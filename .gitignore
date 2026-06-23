@@ -6,3 +6,4 @@ dist-ssr/
 .env.*
 !.env.example
 CANDATA.csv
+.claude
