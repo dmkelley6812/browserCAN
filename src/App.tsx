@@ -5,7 +5,7 @@ import FileUpload from "./components/FileUpload";
 import TableView from "./components/TableView";
 import GraphView from "./components/GraphView";
 
-type Tab = "table" | "graph";
+type Tab = "table" | "graph" | "signalscout";
 
 export default function App() {
   const [summaries, setSummaries] = useState<CanIdSummary[] | null>(null);
@@ -130,12 +130,12 @@ export default function App() {
 
       {/* Tab bar */}
       <div className="flex items-center gap-1 px-5 py-2 border-b border-slate-800 flex-shrink-0 bg-slate-900/40">
-        {(["table", "graph"] as Tab[]).map((tab) => (
+        {(["table", "graph", "signalscout"] as Tab[]).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={`
-              px-4 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize
+              px-4 py-1.5 rounded-lg text-sm font-medium transition-colors
               ${
                 activeTab === tab
                   ? "bg-sky-600/20 text-sky-300 border border-sky-700/50"
@@ -143,7 +143,7 @@ export default function App() {
               }
             `}
           >
-            {tab === "table" ? "Frame Table" : "Graph View"}
+            {tab === "table" ? "Frame Table" : tab === "graph" ? "Graph View" : "SignalScout"}
           </button>
         ))}
 
@@ -172,12 +172,26 @@ export default function App() {
             filterIds={filterIds}
             onToggleFilter={toggleFilter}
           />
-        ) : (
+        ) : activeTab === "graph" ? (
           <GraphView
             summaries={summaries}
             highlightedIds={highlightedIds}
             filterIds={filterIds}
           />
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-8">
+            <div className="text-4xl font-bold tracking-tight text-slate-200">
+              Signal<span className="text-sky-400">Scout</span>
+            </div>
+            <p className="text-slate-400 text-sm max-w-md">
+              Coming soon — live signal tracking to help reverse engineer CAN signals in real time.
+              Watch individual bytes across multiple IDs simultaneously, annotate signals with labels,
+              and detect patterns as your vehicle responds to inputs.
+            </p>
+            <span className="text-xs text-slate-600 border border-slate-800 rounded-full px-3 py-1">
+              In development
+            </span>
+          </div>
         )}
       </main>
     </div>
