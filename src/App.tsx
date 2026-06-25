@@ -49,11 +49,11 @@ export default function App() {
     }
   }
 
-  function handleConnectLive(baudRate: BaudRate, serialBaud: SerialBaud) {
+  function handleConnectLive(baudRate: BaudRate, serialBaud: SerialBaud, sendInit: boolean) {
     setIsLiveMode(true);
     setHighlightedIds(new Set());
     setFilterIds(new Set());
-    serial.connect(baudRate, serialBaud);
+    serial.connect(baudRate, serialBaud, sendInit);
   }
 
   async function handleDisconnectLive() {

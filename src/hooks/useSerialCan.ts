@@ -33,10 +33,11 @@ interface SerialCanState {
   errorMessage: string | null
   baudRate: BaudRate | null
   serialBaud: SerialBaud | null
+  sendInit: boolean
 }
 
 export interface UseSerialCanReturn extends SerialCanState {
-  connect: (baudRate: BaudRate, serialBaud: SerialBaud) => void
+  connect: (baudRate: BaudRate, serialBaud: SerialBaud, sendInit: boolean) => void
   disconnect: () => Promise<void>
   pause: () => void
   resume: () => void
@@ -53,6 +54,7 @@ export function useSerialCan(): UseSerialCanReturn {
     errorMessage: null,
     baudRate: null,
     serialBaud: null,
+    sendInit: false,
   })
 
   // Ring buffer — mutated directly, not state
@@ -137,7 +139,7 @@ export function useSerialCan(): UseSerialCanReturn {
     await writerRef.current.write(encoderRef.current.encode(cmd + '\r'))
   }
 
-  const connect = useCallback((baudRate: BaudRate, serialBaud: SerialBaud) => {
+  const connect = useCallback((baudRate: BaudRate, serialBaud: SerialBaud, sendInit: boolean) => {
     if (!('serial' in navigator)) {
       setState(prev => ({
         ...prev,
@@ -147,7 +149,7 @@ export function useSerialCan(): UseSerialCanReturn {
       return
     }
 
-    setState(prev => ({ ...prev, status: 'connecting', errorMessage: null, baudRate, serialBaud }))
+    setState(prev => ({ ...prev, status: 'connecting', errorMessage: null, baudRate, serialBaud, sendInit }))
 
     ;(async () => {
       try {
@@ -160,9 +162,12 @@ export function useSerialCan(): UseSerialCanReturn {
         const reader = port.readable.getReader()
         readerRef.current = reader
 
-        // Init SLCAN adapter: set baud rate then open channel
-        await writeCommand(SLCAN_BAUD_CMD[baudRate])
-        await writeCommand('O')
+        // Hardware SLCAN adapters (USBtin, etc.) need S+O commands to start.
+        // Streaming firmware (DIY ESP32, etc.) starts immediately — skip to avoid disruption.
+        if (sendInit) {
+          await writeCommand(SLCAN_BAUD_CMD[baudRate])
+          await writeCommand('O')
+        }
 
         // Reset ring buffer
         ringBuf.current = []

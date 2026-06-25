@@ -34,7 +34,7 @@ interface Props {
 }
 
 export default function LiveBar({ serial, onBack }: Props) {
-  const { status, isPaused, totalReceived, errorMessage, baudRate, serialBaud } = serial
+  const { status, isPaused, totalReceived, errorMessage, baudRate, serialBaud, sendInit } = serial
   const isConnected = status === 'connected'
   const isConnecting = status === 'connecting'
 
@@ -120,7 +120,7 @@ export default function LiveBar({ serial, onBack }: Props) {
             {BAUD_RATE_OPTIONS.map((br) => (
               <button
                 key={br}
-                onClick={() => serial.connect(br, serialBaud as SerialBaud)}
+                onClick={() => serial.connect(br, serialBaud as SerialBaud, sendInit)}
                 className={`text-xs px-2 py-1 rounded border transition-colors ${
                   br === baudRate
                     ? 'bg-sky-600/20 border-sky-700/50 text-sky-300'

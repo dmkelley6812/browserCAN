@@ -11,7 +11,7 @@ const BAUD_LABELS: Record<BaudRate, string> = {
 
 interface Props {
   onFile: (text: string, name: string) => void;
-  onConnectLive: (baudRate: BaudRate, serialBaud: SerialBaud) => void;
+  onConnectLive: (baudRate: BaudRate, serialBaud: SerialBaud, sendInit: boolean) => void;
 }
 
 export default function FileUpload({ onFile, onConnectLive }: Props) {
@@ -19,6 +19,7 @@ export default function FileUpload({ onFile, onConnectLive }: Props) {
   const [dragging, setDragging] = useState(false);
   const [selectedBaud, setSelectedBaud] = useState<BaudRate>(500000);
   const [selectedSerialBaud, setSelectedSerialBaud] = useState<SerialBaud>(DEFAULT_SERIAL_BAUD);
+  const [sendInit, setSendInit] = useState(false);
 
   function readFile(file: File) {
     const reader = new FileReader();
@@ -159,8 +160,23 @@ export default function FileUpload({ onFile, onConnectLive }: Props) {
             <span className="text-xs text-slate-600">UART speed to adapter</span>
           </div>
 
+          {/* SLCAN init toggle */}
+          <label className="flex items-center gap-2 mb-4 cursor-pointer select-none group">
+            <input
+              type="checkbox"
+              checked={sendInit}
+              onChange={e => setSendInit(e.target.checked)}
+              disabled={!serialSupported}
+              className="w-3.5 h-3.5 rounded accent-sky-500 disabled:cursor-not-allowed"
+            />
+            <span className="text-xs text-slate-500 group-hover:text-slate-400 transition-colors">
+              Send SLCAN init commands (S+O)
+            </span>
+            <span className="text-xs text-slate-700 ml-1">— for USBtin / dedicated adapters</span>
+          </label>
+
           <button
-            onClick={() => onConnectLive(selectedBaud, selectedSerialBaud)}
+            onClick={() => onConnectLive(selectedBaud, selectedSerialBaud, sendInit)}
             disabled={!serialSupported}
             className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
           >
