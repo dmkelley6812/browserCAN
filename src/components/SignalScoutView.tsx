@@ -1,10 +1,12 @@
 import { useState, useRef, useMemo, useEffect } from 'react'
 import type { CanIdSummary } from '../types'
 
-type SortField = 'id' | 'hz' | 'count'
+type SortField = 'id' | 'hz' | 'count' | 'activity' | 'burst'
 type SortDir = 'asc' | 'desc'
+type BurstWindow = 1 | 2 | 5 | 10
 
-// Same color mapping as TableView so byte columns feel consistent
+const BURST_WINDOWS: BurstWindow[] = [1, 2, 5, 10]
+
 const BYTE_COLORS = [
   'text-sky-400', 'text-emerald-400', 'text-violet-400', 'text-amber-400',
   'text-rose-400', 'text-cyan-400', 'text-lime-400', 'text-fuchsia-400',
@@ -26,9 +28,20 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
   const [maxHz, setMaxHz] = useState('')
   const [changingOnly, setChangingOnly] = useState(false)
 
-  // Read prev bytes during render, write after commit — clean React pattern
-  const prevBytesRef = useRef<Map<number, number[]>>(new Map())
+  // Feature 2: Snapshot / delta mode
+  const [snapshot, setSnapshot] = useState<Map<number, number[]> | null>(null)
 
+  // Feature 3: Burst counter
+  const [burstEnabled, setBurstEnabled] = useState(false)
+  const [burstWindowSec, setBurstWindowSec] = useState<BurstWindow>(2)
+
+  const prevBytesRef = useRef<Map<number, number[]>>(new Map())
+  // Feature 1: tracks when each ID last had a byte change (for float-to-top sort)
+  const lastChangedAtMap = useRef<Map<number, number>>(new Map())
+  // Feature 3: ring of change-event timestamps per ID for burst counting
+  const burstHistory = useRef<Map<number, number[]>>(new Map())
+
+  // Compute per-byte change flags for live flash highlighting
   const changedMap = useMemo(() => {
     const map = new Map<number, boolean[]>()
     for (const s of summaries) {
@@ -42,21 +55,58 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
     return map
   }, [summaries])
 
+  // After commit: update prevBytes, lastChangedAt, and burstHistory
   useEffect(() => {
+    const now = Date.now()
     for (const s of summaries) {
       const last = s.frames[s.frames.length - 1]
-      if (last) prevBytesRef.current.set(s.id, [...last.bytes])
+      if (!last) continue
+      const prev = prevBytesRef.current.get(s.id)
+      if (prev && last.bytes.some((b, i) => b !== prev[i])) {
+        lastChangedAtMap.current.set(s.id, now)
+        const hist = burstHistory.current.get(s.id) ?? []
+        hist.push(now)
+        burstHistory.current.set(s.id, hist)
+      }
+      prevBytesRef.current.set(s.id, [...last.bytes])
     }
   }, [summaries])
 
   const summariesWithHz = useMemo<SummaryWithHz[]>(() => {
     return summaries.map(s => {
-      // Hz only meaningful in live mode (file timestamps may be sequential integers)
       const dMs = s.lastSeen - s.firstSeen
       const hz = isLiveMode && dMs > 100 ? s.frameCount / (dMs / 1000) : 0
       return { ...s, hz }
     })
   }, [summaries, isLiveMode])
+
+  // Feature 2: per-byte diff against snapshot baseline
+  const snapshotDiffMap = useMemo(() => {
+    if (!snapshot) return new Map<number, boolean[]>()
+    const map = new Map<number, boolean[]>()
+    for (const s of summaries) {
+      const snapped = snapshot.get(s.id)
+      if (!snapped) continue
+      const last = s.frames[s.frames.length - 1]
+      if (!last) continue
+      map.set(s.id, last.bytes.map((b, i) => snapped[i] !== undefined && b !== snapped[i]))
+    }
+    return map
+  }, [summaries, snapshot])
+
+  // Feature 3: count change events within the rolling window; prune old entries as a side effect
+  const burstMap = useMemo(() => {
+    const now = Date.now()
+    const windowMs = burstWindowSec * 1000
+    const map = new Map<number, number>()
+    for (const s of summaries) {
+      const hist = burstHistory.current.get(s.id) ?? []
+      const recent = hist.filter(t => t > now - windowMs)
+      burstHistory.current.set(s.id, recent)
+      map.set(s.id, recent.length)
+    }
+    return map
+  }, [summaries, burstWindowSec])
 
   const filtered = useMemo(() => {
     let r = summariesWithHz
@@ -65,20 +115,39 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
     if (isLiveMode && !isNaN(lo)) r = r.filter(s => s.hz >= lo)
     if (isLiveMode && !isNaN(hi)) r = r.filter(s => s.hz <= hi)
     if (changingOnly) r = r.filter(s => s.isChanging)
+    if (snapshot) {
+      r = r.filter(s => {
+        const snapped = snapshot.get(s.id)
+        // IDs that appeared after the snapshot are new — show them
+        if (!snapped) return true
+        const last = s.frames[s.frames.length - 1]
+        if (!last) return false
+        return last.bytes.some((b, i) => b !== snapped[i])
+      })
+    }
     return r
-  }, [summariesWithHz, minHz, maxHz, changingOnly, isLiveMode])
+  }, [summariesWithHz, minHz, maxHz, changingOnly, isLiveMode, snapshot])
 
   const sorted = useMemo(() => {
+    // Activity sort reads lastChangedAtMap ref — re-runs whenever filtered changes (each frame batch)
+    if (sortField === 'activity') {
+      return [...filtered].sort((a, b) =>
+        (lastChangedAtMap.current.get(b.id) ?? 0) - (lastChangedAtMap.current.get(a.id) ?? 0)
+      )
+    }
+    if (sortField === 'burst') {
+      return [...filtered].sort((a, b) => (burstMap.get(b.id) ?? 0) - (burstMap.get(a.id) ?? 0))
+    }
     const f = sortDir === 'asc' ? 1 : -1
     return [...filtered].sort((a, b) => {
       if (sortField === 'hz') return f * (a.hz - b.hz)
       if (sortField === 'count') return f * (a.frameCount - b.frameCount)
       return f * (a.id - b.id)
     })
-  }, [filtered, sortField, sortDir])
+  }, [filtered, sortField, sortDir, burstMap])
 
   function handleSort(field: SortField) {
-    if (sortField === field) {
+    if (sortField === field && field !== 'activity' && field !== 'burst') {
       setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
     } else {
       setSortField(field)
@@ -86,8 +155,28 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
     }
   }
 
+  function takeSnapshot() {
+    const map = new Map<number, number[]>()
+    for (const s of summaries) {
+      const last = s.frames[s.frames.length - 1]
+      if (last) map.set(s.id, [...last.bytes])
+    }
+    setSnapshot(map)
+  }
+
+  const snapshotChangedCount = snapshot
+    ? summaries.filter(s => {
+        const snapped = snapshot.get(s.id)
+        if (!snapped) return false
+        const last = s.frames[s.frames.length - 1]
+        if (!last) return false
+        return last.bytes.some((b, i) => b !== snapped[i])
+      }).length
+    : 0
+
   function SortArrow({ field }: { field: SortField }) {
     if (sortField !== field) return <span className="text-slate-700 ml-0.5">↕</span>
+    if (field === 'activity' || field === 'burst') return <span className="text-sky-400 ml-0.5">↓</span>
     return <span className="text-sky-400 ml-0.5">{sortDir === 'asc' ? '↑' : '↓'}</span>
   }
 
@@ -99,10 +188,17 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
     return `${(hz * 1000).toFixed(0)}m`
   }
 
+  function burstHeatClass(count: number): string {
+    if (count === 0) return 'text-slate-600'
+    if (count < 3) return 'text-yellow-500'
+    if (count < 8) return 'text-orange-400'
+    return 'text-red-400'
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Filter / control bar */}
-      <div className="flex items-center gap-4 px-4 py-2 border-b border-slate-800 bg-slate-900/40 flex-shrink-0 flex-wrap">
+      {/* Control bar */}
+      <div className="flex items-center gap-3 px-4 py-2 border-b border-slate-800 bg-slate-900/40 flex-shrink-0 flex-wrap">
         <span className="text-xs text-slate-500">
           <span className="text-slate-300">{sorted.length}</span>
           {summaries.length !== sorted.length && (
@@ -111,31 +207,25 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
           IDs
         </span>
 
-        {/* Hz range filter — only meaningful in live mode */}
+        {/* Hz range filter */}
         {isLiveMode && (
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-500">Hz</span>
             <input
-              type="number"
-              min="0"
-              placeholder="min"
-              value={minHz}
+              type="number" min="0" placeholder="min" value={minHz}
               onChange={e => setMinHz(e.target.value)}
               className="w-16 text-xs px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 placeholder-slate-600 focus:outline-none focus:border-sky-700"
             />
             <span className="text-slate-700">–</span>
             <input
-              type="number"
-              min="0"
-              placeholder="max"
-              value={maxHz}
+              type="number" min="0" placeholder="max" value={maxHz}
               onChange={e => setMaxHz(e.target.value)}
               className="w-16 text-xs px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 placeholder-slate-600 focus:outline-none focus:border-sky-700"
             />
           </div>
         )}
 
-        {/* Active only toggle */}
+        {/* Active only */}
         <button
           onClick={() => setChangingOnly(c => !c)}
           className={`text-xs px-3 py-1 rounded-lg border transition-colors ${
@@ -147,12 +237,94 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
           Active only
         </button>
 
-        {/* Live legend */}
+        {/* Feature 1: Float to top */}
+        <button
+          onClick={() => handleSort('activity')}
+          title="Sort by most-recently-changed — active IDs float to top on each update"
+          className={`text-xs px-3 py-1 rounded-lg border transition-colors ${
+            sortField === 'activity'
+              ? 'bg-emerald-600/20 border-emerald-700/50 text-emerald-300'
+              : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600'
+          }`}
+        >
+          Float to top
+        </button>
+
+        {/* Feature 2: Snapshot / delta mode */}
+        {snapshot ? (
+          <div className="flex items-center">
+            <span className={`text-xs font-mono px-2 py-1 rounded-l-lg border border-r-0 ${
+              snapshotChangedCount > 0
+                ? 'bg-orange-500/15 border-orange-700/50 text-orange-300'
+                : 'bg-slate-800 border-slate-700 text-slate-500'
+            }`}>
+              {snapshotChangedCount > 0 ? `${snapshotChangedCount} Δ` : 'no Δ'}
+            </span>
+            <button
+              onClick={takeSnapshot}
+              title="Re-snapshot current state as new baseline"
+              className="text-xs px-2 py-1 bg-slate-800 border border-r-0 border-slate-700 text-slate-400 hover:text-slate-200 transition-colors"
+            >
+              ↺
+            </button>
+            <button
+              onClick={() => setSnapshot(null)}
+              title="Clear snapshot and exit delta mode"
+              className="text-xs px-2 py-1 rounded-r-lg bg-slate-800 border border-slate-700 text-slate-500 hover:text-red-400 hover:border-red-900 transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={takeSnapshot}
+            title="Capture current byte values — delta mode then shows only IDs that change from this baseline"
+            className="text-xs px-3 py-1 rounded-lg border bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600 transition-colors"
+          >
+            ⊙ Snapshot
+          </button>
+        )}
+
+        {/* Feature 3: Burst counter window selector */}
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-slate-500 mr-0.5">Burst</span>
+          <button
+            onClick={() => setBurstEnabled(false)}
+            className={`text-xs px-2 py-1 rounded-l-lg border border-r-0 transition-colors ${
+              !burstEnabled
+                ? 'bg-violet-600/20 border-violet-700/50 text-violet-300'
+                : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            Off
+          </button>
+          {BURST_WINDOWS.map((w, i) => (
+            <button
+              key={w}
+              onClick={() => { setBurstEnabled(true); setBurstWindowSec(w) }}
+              className={`text-xs px-2 py-1 border border-r-0 transition-colors ${
+                i === BURST_WINDOWS.length - 1 ? 'rounded-r-lg border-r' : ''
+              } ${
+                burstEnabled && burstWindowSec === w
+                  ? 'bg-violet-600/20 border-violet-700/50 text-violet-300'
+                  : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              {w}s
+            </button>
+          ))}
+        </div>
+
+        {/* Legend */}
         {isLiveMode && (
           <span className="ml-auto flex items-center gap-2 text-xs text-slate-600">
             <span className="inline-block w-3 h-3 rounded-sm bg-yellow-500/30 border border-yellow-600/30" />
-            changed
-            <span className="inline-block w-3 h-3 rounded-sm bg-slate-800 border border-slate-700 ml-2" />
+            live Δ
+            {snapshot && <>
+              <span className="inline-block w-3 h-3 rounded-sm bg-orange-500/30 border border-orange-600/30 ml-1" />
+              snap Δ
+            </>}
+            <span className="inline-block w-3 h-3 rounded-sm bg-slate-800 border border-slate-700 ml-1" />
             static
           </span>
         )}
@@ -184,6 +356,14 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
               >
                 Count <SortArrow field="count" />
               </th>
+              {burstEnabled && (
+                <th
+                  className="px-3 py-2 text-right font-medium cursor-pointer hover:text-slate-300 border-b border-slate-800 whitespace-nowrap select-none text-violet-500/70"
+                  onClick={() => handleSort('burst')}
+                >
+                  Burst <SortArrow field="burst" />
+                </th>
+              )}
               {Array.from({ length: 8 }, (_, i) => (
                 <th
                   key={i}
@@ -200,39 +380,38 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
               const last = s.frames[s.frames.length - 1]
               const bytes = last?.bytes ?? Array(8).fill(0)
               const changed = changedMap.get(s.id) ?? Array(8).fill(false)
+              const snapDiff = snapshotDiffMap.get(s.id) ?? Array(8).fill(false)
+              const burstCount = burstMap.get(s.id) ?? 0
 
               return (
                 <tr
                   key={s.id}
                   className="hover:bg-slate-800/30 transition-colors group border-b border-slate-800/40"
                 >
-                  {/* ID */}
                   <td className="px-4 py-1.5 font-mono text-sky-300 whitespace-nowrap border-b border-slate-800/30">
                     {s.idHex}
                     {s.frames[0]?.extended && (
                       <span className="ml-1.5 text-[10px] text-slate-600 font-normal">ext</span>
                     )}
                   </td>
-
-                  {/* DLC */}
                   <td className="px-3 py-1.5 text-center font-mono text-slate-600 border-b border-slate-800/30">
                     {s.dlc}
                   </td>
-
-                  {/* Hz */}
                   <td className={`px-3 py-1.5 text-right font-mono tabular-nums border-b border-slate-800/30 ${s.isChanging && isLiveMode ? 'text-slate-300' : 'text-slate-600'}`}>
                     {formatHz((s as SummaryWithHz).hz)}
                   </td>
-
-                  {/* Frame count */}
                   <td className="px-3 py-1.5 text-right font-mono tabular-nums text-slate-500 border-b border-slate-800/30">
                     {s.frameCount.toLocaleString()}
                   </td>
-
-                  {/* Byte cells */}
+                  {burstEnabled && (
+                    <td className={`px-3 py-1.5 text-right font-mono tabular-nums border-b border-slate-800/30 ${burstHeatClass(burstCount)}`}>
+                      {burstCount > 0 ? burstCount : '—'}
+                    </td>
+                  )}
                   {Array.from({ length: 8 }, (_, i) => {
                     const b = bytes[i] ?? 0
-                    const isActive = isLiveMode && changed[i]
+                    const isLiveChanged = isLiveMode && changed[i]
+                    const isSnapDiff = !!snapshot && snapDiff[i]
                     const isStatic = !s.byteChangeMask[i]
                     const inRange = i < s.dlc
 
@@ -244,11 +423,13 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
                           transition-colors duration-100 border-b border-slate-800/30
                           ${!inRange
                             ? 'text-slate-800'
-                            : isActive
-                              ? 'bg-yellow-500/20 text-yellow-100 font-semibold'
-                              : isStatic
-                                ? 'text-slate-700'
-                                : BYTE_COLORS[i]
+                            : isSnapDiff
+                              ? 'bg-orange-500/20 text-orange-200 font-semibold'
+                              : isLiveChanged
+                                ? 'bg-yellow-500/20 text-yellow-100 font-semibold'
+                                : isStatic
+                                  ? 'text-slate-700'
+                                  : BYTE_COLORS[i]
                           }
                         `}
                       >
@@ -256,13 +437,11 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
                       </td>
                     )
                   })}
-
-                  {/* Stub builder button — visible on row hover */}
                   <td className="px-2 py-1.5 border-b border-slate-800/30">
                     <button
                       title="Frame Builder — coming soon"
                       className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-600 hover:text-sky-400 px-1.5 py-0.5 rounded border border-transparent hover:border-sky-900 text-[11px] leading-none"
-                      onClick={() => {/* wired up when Frame Builder is implemented */}}
+                      onClick={() => {}}
                     >
                       →
                     </button>
@@ -282,7 +461,9 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
                     <span>Waiting for CAN frames...</span>
                   </>
                 : <span>No CAN data loaded.</span>
-              : <span>No IDs match the current filters.</span>
+              : snapshot
+                ? <span>No IDs changed since snapshot.</span>
+                : <span>No IDs match the current filters.</span>
             }
           </div>
         )}
