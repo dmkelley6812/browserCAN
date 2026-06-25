@@ -35,6 +35,9 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
   const [burstEnabled, setBurstEnabled] = useState(false)
   const [burstWindowSec, setBurstWindowSec] = useState<BurstWindow>(2)
 
+  // Ignore list: hide individual IDs from the table
+  const [ignoredIds, setIgnoredIds] = useState<Set<number>>(new Set())
+
   const prevBytesRef = useRef<Map<number, number[]>>(new Map())
   // Feature 1: tracks when each ID last had a byte change (for float-to-top sort)
   const lastChangedAtMap = useRef<Map<number, number>>(new Map())
@@ -112,6 +115,7 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
     let r = summariesWithHz
     const lo = parseFloat(minHz)
     const hi = parseFloat(maxHz)
+    r = r.filter(s => !ignoredIds.has(s.id))
     if (isLiveMode && !isNaN(lo)) r = r.filter(s => s.hz >= lo)
     if (isLiveMode && !isNaN(hi)) r = r.filter(s => s.hz <= hi)
     if (changingOnly) r = r.filter(s => s.isChanging)
@@ -153,6 +157,15 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
       setSortField(field)
       setSortDir(field === 'id' ? 'asc' : 'desc')
     }
+  }
+
+  function toggleIgnore(id: number) {
+    setIgnoredIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
   function takeSnapshot() {
@@ -206,6 +219,21 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
           )}{' '}
           IDs
         </span>
+
+        {ignoredIds.size > 0 && (
+          <div className="flex items-center">
+            <span className="text-xs px-2 py-1 rounded-l-lg border border-r-0 bg-slate-800 border-slate-700 text-slate-500">
+              {ignoredIds.size} hidden
+            </span>
+            <button
+              onClick={() => setIgnoredIds(new Set())}
+              title="Unhide all ignored IDs"
+              className="text-xs px-2 py-1 rounded-r-lg bg-slate-800 border border-slate-700 text-slate-500 hover:text-red-400 hover:border-red-900 transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Hz range filter */}
         {isLiveMode && (
@@ -372,7 +400,7 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
                   D{i}
                 </th>
               ))}
-              <th className="px-3 py-2 border-b border-slate-800 w-8" />
+              <th className="px-3 py-2 border-b border-slate-800 w-14" />
             </tr>
           </thead>
           <tbody>
@@ -438,13 +466,22 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
                     )
                   })}
                   <td className="px-2 py-1.5 border-b border-slate-800/30">
-                    <button
-                      title="Frame Builder — coming soon"
-                      className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-600 hover:text-sky-400 px-1.5 py-0.5 rounded border border-transparent hover:border-sky-900 text-[11px] leading-none"
-                      onClick={() => {}}
-                    >
-                      →
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        title="Ignore — hide this ID from SignalScout"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-600 hover:text-rose-400 px-1.5 py-0.5 rounded border border-transparent hover:border-rose-900 text-[11px] leading-none"
+                        onClick={() => toggleIgnore(s.id)}
+                      >
+                        ⊘
+                      </button>
+                      <button
+                        title="Frame Builder — coming soon"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-600 hover:text-sky-400 px-1.5 py-0.5 rounded border border-transparent hover:border-sky-900 text-[11px] leading-none"
+                        onClick={() => {}}
+                      >
+                        →
+                      </button>
+                    </div>
                   </td>
                 </tr>
               )
