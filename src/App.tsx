@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback } from "react";
 import { parseGvretCsv, buildIdSummaries } from "./utils/parseGvret";
 import { parseSlcanLog, isSlcanFormat } from "./utils/parseSlcan";
 import { useSerialCan } from "./hooks/useSerialCan";
-import type { BaudRate } from "./hooks/useSerialCan";
+import type { BaudRate, SerialBaud } from "./hooks/useSerialCan";
 import type { CanFrame, CanIdSummary } from "./types";
 import FileUpload from "./components/FileUpload";
 import LiveBar from "./components/LiveBar";
@@ -49,11 +49,11 @@ export default function App() {
     }
   }
 
-  function handleConnectLive(baudRate: BaudRate) {
+  function handleConnectLive(baudRate: BaudRate, serialBaud: SerialBaud) {
     setIsLiveMode(true);
     setHighlightedIds(new Set());
     setFilterIds(new Set());
-    serial.connect(baudRate);
+    serial.connect(baudRate, serialBaud);
   }
 
   async function handleDisconnectLive() {

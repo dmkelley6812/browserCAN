@@ -4,9 +4,15 @@ import { buildIdSummaries } from '../utils/parseGvret'
 import { parseSingleSlcanFrame } from '../utils/parseSlcan'
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
-export type BaudRate = 125000 | 250000 | 500000 | 1000000
 
+// CAN bus bitrate — sent to adapter via SLCAN 'S' command
+export type BaudRate = 125000 | 250000 | 500000 | 1000000
 export const BAUD_RATE_OPTIONS: BaudRate[] = [125000, 250000, 500000, 1000000]
+
+// USB serial port speed — used by port.open(), separate from CAN bitrate
+export type SerialBaud = 9600 | 19200 | 38400 | 57600 | 115200 | 230400 | 500000 | 1000000
+export const SERIAL_BAUD_OPTIONS: SerialBaud[] = [9600, 19200, 38400, 57600, 115200, 230400, 500000, 1000000]
+export const DEFAULT_SERIAL_BAUD: SerialBaud = 115200
 
 const SLCAN_BAUD_CMD: Record<BaudRate, string> = {
   125000: 'S4',
@@ -26,10 +32,11 @@ interface SerialCanState {
   totalReceived: number
   errorMessage: string | null
   baudRate: BaudRate | null
+  serialBaud: SerialBaud | null
 }
 
 export interface UseSerialCanReturn extends SerialCanState {
-  connect: (baudRate: BaudRate) => void
+  connect: (baudRate: BaudRate, serialBaud: SerialBaud) => void
   disconnect: () => Promise<void>
   pause: () => void
   resume: () => void
@@ -45,6 +52,7 @@ export function useSerialCan(): UseSerialCanReturn {
     totalReceived: 0,
     errorMessage: null,
     baudRate: null,
+    serialBaud: null,
   })
 
   // Ring buffer — mutated directly, not state
@@ -129,7 +137,7 @@ export function useSerialCan(): UseSerialCanReturn {
     await writerRef.current.write(encoderRef.current.encode(cmd + '\r'))
   }
 
-  const connect = useCallback((baudRate: BaudRate) => {
+  const connect = useCallback((baudRate: BaudRate, serialBaud: SerialBaud) => {
     if (!('serial' in navigator)) {
       setState(prev => ({
         ...prev,
@@ -139,12 +147,12 @@ export function useSerialCan(): UseSerialCanReturn {
       return
     }
 
-    setState(prev => ({ ...prev, status: 'connecting', errorMessage: null, baudRate }))
+    setState(prev => ({ ...prev, status: 'connecting', errorMessage: null, baudRate, serialBaud }))
 
     ;(async () => {
       try {
         const port = await navigator.serial.requestPort()
-        await port.open({ baudRate })
+        await port.open({ baudRate: serialBaud })
         portRef.current = port
 
         const writer = port.writable.getWriter()

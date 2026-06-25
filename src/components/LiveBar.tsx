@@ -1,4 +1,4 @@
-import type { ConnectionStatus, BaudRate, UseSerialCanReturn } from '../hooks/useSerialCan'
+import type { ConnectionStatus, BaudRate, SerialBaud, UseSerialCanReturn } from '../hooks/useSerialCan'
 import { BAUD_RATE_OPTIONS } from '../hooks/useSerialCan'
 
 const BAUD_LABELS: Record<BaudRate, string> = {
@@ -34,7 +34,7 @@ interface Props {
 }
 
 export default function LiveBar({ serial, onBack }: Props) {
-  const { status, isPaused, totalReceived, errorMessage, baudRate } = serial
+  const { status, isPaused, totalReceived, errorMessage, baudRate, serialBaud } = serial
   const isConnected = status === 'connected'
   const isConnecting = status === 'connecting'
 
@@ -46,8 +46,10 @@ export default function LiveBar({ serial, onBack }: Props) {
         <span className={isConnected ? 'text-emerald-400' : status === 'error' ? 'text-rose-400' : 'text-slate-400'}>
           {statusLabel(status)}
         </span>
-        {isConnected && baudRate && (
-          <span className="text-slate-600">@ {BAUD_LABELS[baudRate]}</span>
+        {(isConnected || isConnecting) && baudRate && serialBaud && (
+          <span className="text-slate-600">
+            CAN {BAUD_LABELS[baudRate]} · Serial {serialBaud >= 1000000 ? '1M' : `${serialBaud / 1000}k`}
+          </span>
         )}
       </div>
 
@@ -110,16 +112,20 @@ export default function LiveBar({ serial, onBack }: Props) {
         )}
       </div>
 
-      {/* Baud rate selector when disconnected (to retry) */}
-      {!isConnected && !isConnecting && (
+      {/* Retry panel when disconnected/errored — re-use last known settings */}
+      {!isConnected && !isConnecting && baudRate && serialBaud && (
         <div className="flex items-center gap-2 border-l border-slate-800 pl-3">
           <span className="text-xs text-slate-500">Retry:</span>
           <div className="flex gap-1">
             {BAUD_RATE_OPTIONS.map((br) => (
               <button
                 key={br}
-                onClick={() => serial.connect(br)}
-                className="text-xs px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-400 hover:text-sky-300 hover:border-sky-700 transition-colors"
+                onClick={() => serial.connect(br, serialBaud as SerialBaud)}
+                className={`text-xs px-2 py-1 rounded border transition-colors ${
+                  br === baudRate
+                    ? 'bg-sky-600/20 border-sky-700/50 text-sky-300'
+                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-sky-300 hover:border-sky-700'
+                }`}
               >
                 {BAUD_LABELS[br]}
               </button>
