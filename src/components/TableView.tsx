@@ -1,106 +1,52 @@
-import { useState, useMemo } from 'react'
-import type { CanIdSummary } from '../types'
+import { useState, useMemo, useRef } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
+import type { CanFrame, CanIdSummary } from '../types'
+
+type ViewMode = 'raw' | 'condensed'
 
 const BYTE_TEXT_COLORS = [
   'text-sky-400', 'text-emerald-400', 'text-violet-400', 'text-amber-400',
   'text-rose-400', 'text-cyan-400', 'text-lime-400', 'text-fuchsia-400',
 ]
 
-const BIT_COLORS = [
-  '#e879f9', '#818cf8', '#38bdf8', '#34d399',
-  '#a3e635', '#fbbf24', '#fb923c', '#f87171',
-]
-
-// Bit grid for a single byte value — shows b7..b0 as colored squares
-function ByteBitGrid({ value, byteIdx, changeMask }: { value: number; byteIdx: number; changeMask: boolean[] }) {
-  return (
-    <div className="flex gap-0.5 items-center">
-      {Array.from({ length: 8 }, (_, pos) => {
-        const bit = 7 - pos
-        const isHigh = (value >> bit) & 1
-        const everChanges = changeMask[byteIdx] // byte-level change indicator
-        return (
-          <div
-            key={bit}
-            title={`b${bit}: ${isHigh}`}
-            className="relative group/bit"
-          >
-            <div
-              style={{
-                width: 7,
-                height: 14,
-                borderRadius: 2,
-                background: isHigh
-                  ? BIT_COLORS[pos]
-                  : '#1e293b',
-                opacity: (!everChanges && !isHigh) ? 0.4 : 1,
-                border: `1px solid ${isHigh ? BIT_COLORS[pos] : '#334155'}`,
-              }}
-            />
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/bit:block z-20 pointer-events-none">
-              <div className="bg-slate-800 text-slate-200 text-[10px] font-mono px-1.5 py-0.5 rounded whitespace-nowrap border border-slate-700">
-                b{bit}={isHigh}
-              </div>
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-// Expandable bit detail row for a single CAN ID
-function BitDetailRow({ summary, bytes, maxDlc }: { summary: CanIdSummary; bytes: number[]; maxDlc: number }) {
-  const byteCount = bytes.length
+function FrameSubTable({ frames, maxDlc }: { frames: CanFrame[]; maxDlc: number }) {
   return (
     <tr className="bg-slate-950/60 border-b border-slate-800/40">
-      <td colSpan={8 + maxDlc} className="px-4 py-3">
-        <div className="flex flex-wrap gap-4">
-          {Array.from({ length: byteCount }, (_, i) => {
-            const val = bytes[i] ?? 0
-            const binStr = val.toString(2).padStart(8, '0')
-            return (
-              <div key={i} className="flex flex-col gap-1.5">
-                <div className="flex items-center gap-2">
-                  <span className={`text-xs font-mono font-semibold ${BYTE_TEXT_COLORS[i % BYTE_TEXT_COLORS.length]}`}>
+      <td colSpan={100} className="px-4 py-2">
+        <div className="max-h-48 overflow-y-auto border border-slate-800 rounded">
+          <table className="w-full text-xs font-mono border-collapse">
+            <thead className="sticky top-0 bg-slate-900">
+              <tr className="text-slate-500">
+                <th className="text-left px-2 py-1 font-medium">Time (ms)</th>
+                {Array.from({ length: maxDlc }, (_, i) => (
+                  <th key={i} className={`text-left px-2 py-1 font-medium ${BYTE_TEXT_COLORS[i % BYTE_TEXT_COLORS.length]}`}>
                     B{i + 1}
-                  </span>
-                  <span className="text-xs font-mono text-slate-400">
-                    0x{val.toString(16).toUpperCase().padStart(2, '0')}
-                  </span>
-                  <span className="text-xs font-mono text-slate-600">{val}</span>
-                </div>
-                {/* Bit bars */}
-                <ByteBitGrid value={val} byteIdx={i} changeMask={summary.byteChangeMask} />
-                {/* Binary label */}
-                <div className="flex gap-0.5">
-                  {binStr.split('').map((bit, pos) => (
-                    <span
-                      key={pos}
-                      className="text-[9px] font-mono w-[7px] text-center"
-                      style={{ color: bit === '1' ? BIT_COLORS[pos] : '#475569' }}
-                    >
-                      {bit}
-                    </span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {frames.map((f, i) => (
+                <tr key={i} className={`border-t border-slate-800/30 hover:bg-slate-800/20 ${i % 2 !== 0 ? 'bg-slate-900/20' : ''}`}>
+                  <td className="px-2 py-0.5 text-slate-400">{f.timestamp.toLocaleString()}</td>
+                  {Array.from({ length: maxDlc }, (_, bi) => (
+                    <td key={bi} className={`px-2 py-0.5 ${bi < f.dlc ? BYTE_TEXT_COLORS[bi % BYTE_TEXT_COLORS.length] : 'text-slate-700'}`}>
+                      {f.bytes[bi].toString(16).toUpperCase().padStart(2, '0')}
+                    </td>
                   ))}
-                </div>
-                <div className="flex gap-0.5">
-                  {Array.from({ length: 8 }, (_, pos) => (
-                    <span key={pos} className="text-[9px] font-mono w-[7px] text-center text-slate-700">
-                      {7 - pos}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )
-          })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
+        <div className="text-xs text-slate-600 mt-1">{frames.length.toLocaleString()} frames</div>
       </td>
     </tr>
   )
 }
 
 interface Props {
+  frames: CanFrame[]
   summaries: CanIdSummary[]
   highlightedIds: Set<number>
   onToggleHighlight: (id: number) => void
@@ -109,29 +55,45 @@ interface Props {
 }
 
 export default function TableView({
+  frames,
   summaries,
   highlightedIds,
   onToggleHighlight,
   filterIds,
   onToggleFilter,
 }: Props) {
-  const [hideStatic, setHideStatic] = useState(false)
+  const [viewMode, setViewMode] = useState<ViewMode>('raw')
   const [searchTerm, setSearchTerm] = useState('')
+  const [showOnlyFiltered, setShowOnlyFiltered] = useState(false)
+  // Condensed-mode state
+  const [hideStatic, setHideStatic] = useState(false)
   const [sortKey, setSortKey] = useState<'id' | 'count' | 'firstSeen'>('id')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
-  const [showOnlyFiltered, setShowOnlyFiltered] = useState(false)
-  const [expandedBitRows, setExpandedBitRows] = useState<Set<number>>(new Set())
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
 
-  const filtered = useMemo(() => {
-    let list = summaries
-    if (hideStatic) list = list.filter((s) => s.isChanging)
+  const maxDlc = useMemo(() => summaries.reduce((max, s) => Math.max(max, s.dlc), 0), [summaries])
+
+  const filteredFrames = useMemo(() => {
+    if (viewMode !== 'raw') return []
+    let list = frames
     if (showOnlyFiltered && filterIds.size > 0)
-      list = list.filter((s) => filterIds.has(s.id))
+      list = list.filter(f => filterIds.has(f.id))
     if (searchTerm) {
       const t = searchTerm.toLowerCase()
-      list = list.filter(
-        (s) => s.idHex.toLowerCase().includes(t) || s.id.toString().includes(t),
-      )
+      list = list.filter(f => f.idHex.toLowerCase().includes(t) || f.id.toString().includes(t))
+    }
+    return list
+  }, [viewMode, frames, searchTerm, showOnlyFiltered, filterIds])
+
+  const filteredSummaries = useMemo(() => {
+    if (viewMode !== 'condensed') return []
+    let list = summaries
+    if (hideStatic) list = list.filter(s => s.isChanging)
+    if (showOnlyFiltered && filterIds.size > 0)
+      list = list.filter(s => filterIds.has(s.id))
+    if (searchTerm) {
+      const t = searchTerm.toLowerCase()
+      list = list.filter(s => s.idHex.toLowerCase().includes(t) || s.id.toString().includes(t))
     }
     return [...list].sort((a, b) => {
       let av: number, bv: number
@@ -140,15 +102,15 @@ export default function TableView({
       else { av = a.firstSeen; bv = b.firstSeen }
       return sortDir === 'asc' ? av - bv : bv - av
     })
-  }, [summaries, hideStatic, searchTerm, sortKey, sortDir, showOnlyFiltered, filterIds])
+  }, [viewMode, summaries, hideStatic, searchTerm, sortKey, sortDir, showOnlyFiltered, filterIds])
 
   function toggleSort(key: typeof sortKey) {
-    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortKey(key); setSortDir('asc') }
   }
 
-  function toggleBitRow(id: number) {
-    setExpandedBitRows((prev) => {
+  function toggleExpand(id: number) {
+    setExpandedIds(prev => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
@@ -161,208 +123,275 @@ export default function TableView({
     return <span className="ml-1 text-sky-400">{sortDir === 'asc' ? '↑' : '↓'}</span>
   }
 
-  const latestFrames = useMemo(() => {
-    const map = new Map<number, number[]>()
-    for (const s of summaries) {
-      map.set(s.id, s.frames[s.frames.length - 1].bytes)
-    }
-    return map
-  }, [summaries])
+  const scrollRef = useRef<HTMLDivElement>(null)
 
-  const maxDlc = useMemo(() => {
-    return summaries.reduce((max, s) => Math.max(max, s.dlc), 0)
-  }, [summaries])
+  const virtualizer = useVirtualizer({
+    count: filteredFrames.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 34,
+    overscan: 15,
+  })
 
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3 p-4 border-b border-slate-800">
+        {/* View mode toggle */}
+        <div className="flex rounded-lg overflow-hidden border border-slate-700 text-xs">
+          <button
+            onClick={() => setViewMode('raw')}
+            className={`px-3 py-1.5 transition-colors ${viewMode === 'raw' ? 'bg-sky-600/30 text-sky-300' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}
+          >
+            All Frames
+          </button>
+          <button
+            onClick={() => setViewMode('condensed')}
+            className={`px-3 py-1.5 border-l border-slate-700 transition-colors ${viewMode === 'condensed' ? 'bg-sky-600/30 text-sky-300' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}
+          >
+            By ID
+          </button>
+        </div>
+
         <input
           type="text"
           placeholder="Search ID (hex or decimal)…"
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          onChange={e => setSearchTerm(e.target.value)}
           className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500 w-56"
         />
-        <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={hideStatic}
-            onChange={(e) => setHideStatic(e.target.checked)}
-            className="accent-sky-500"
-          />
-          Hide static IDs
-        </label>
+
+        {viewMode === 'condensed' && (
+          <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={hideStatic}
+              onChange={e => setHideStatic(e.target.checked)}
+              className="accent-sky-500"
+            />
+            Hide static IDs
+          </label>
+        )}
+
         {filterIds.size > 0 && (
           <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer select-none">
             <input
               type="checkbox"
               checked={showOnlyFiltered}
-              onChange={(e) => setShowOnlyFiltered(e.target.checked)}
+              onChange={e => setShowOnlyFiltered(e.target.checked)}
               className="accent-sky-500"
             />
             Show selected only ({filterIds.size})
           </label>
         )}
-        {expandedBitRows.size > 0 && (
+
+        {viewMode === 'condensed' && expandedIds.size > 0 && (
           <button
-            onClick={() => setExpandedBitRows(new Set())}
+            onClick={() => setExpandedIds(new Set())}
             className="text-xs text-slate-600 hover:text-slate-400 transition-colors"
           >
-            Collapse all bits
+            Collapse all
           </button>
         )}
+
         <span className="ml-auto text-xs text-slate-500">
-          {filtered.length} / {summaries.length} IDs
+          {viewMode === 'raw'
+            ? `${filteredFrames.length.toLocaleString()} / ${frames.length.toLocaleString()} frames`
+            : `${filteredSummaries.length} / ${summaries.length} IDs`
+          }
         </span>
       </div>
 
       {/* Table */}
-      <div className="overflow-auto flex-1">
-        <table className="w-full text-sm border-collapse">
-          <thead className="sticky top-0 z-10 bg-slate-900 text-slate-400">
-            <tr>
-              <th className="w-10 px-3 py-2.5 text-left font-medium">Pin</th>
-              <th
-                className="px-3 py-2.5 text-left font-medium cursor-pointer hover:text-slate-200 whitespace-nowrap"
-                onClick={() => toggleSort('id')}
-              >
-                CAN ID <SortIcon k="id" />
-              </th>
-              <th className="px-3 py-2.5 text-left font-medium">DLC</th>
-              <th
-                className="px-3 py-2.5 text-left font-medium cursor-pointer hover:text-slate-200 whitespace-nowrap"
-                onClick={() => toggleSort('count')}
-              >
-                Frames <SortIcon k="count" />
-              </th>
-              <th
-                className="px-3 py-2.5 text-left font-medium cursor-pointer hover:text-slate-200 whitespace-nowrap"
-                onClick={() => toggleSort('firstSeen')}
-              >
-                First (ms) <SortIcon k="firstSeen" />
-              </th>
-              <th className="px-3 py-2.5 text-left font-medium">Last (ms)</th>
-              <th className="px-3 py-2.5 text-left font-medium">Status</th>
-              {Array.from({ length: maxDlc }, (_, i) => (
-                <th
-                  key={i}
-                  className={`px-3 py-2.5 text-left font-medium font-mono text-xs ${BYTE_TEXT_COLORS[i % BYTE_TEXT_COLORS.length]}`}
-                >
-                  B{i + 1}
-                </th>
-              ))}
-              <th className="px-3 py-2.5 text-left font-medium w-16">Bits</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((s) => {
-              const isHighlighted = highlightedIds.has(s.id)
-              const isPinned = filterIds.has(s.id)
-              const bitsOpen = expandedBitRows.has(s.id)
-              const bytes = latestFrames.get(s.id) ?? s.minBytes
-              return (
-                <>
-                  <tr
-                    key={s.id}
-                    onClick={() => onToggleHighlight(s.id)}
-                    className={`
-                      border-b border-slate-800/60 cursor-pointer transition-colors
-                      ${isHighlighted ? 'bg-sky-900/30 hover:bg-sky-900/40' : 'hover:bg-slate-800/50'}
-                      ${bitsOpen ? 'border-b-0' : ''}
-                    `}
-                  >
-                    {/* Pin */}
-                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() => onToggleFilter(s.id)}
-                        title={isPinned ? 'Remove filter' : 'Filter to this ID'}
-                        className={`w-6 h-6 rounded text-xs transition-colors ${
-                          isPinned
-                            ? 'bg-sky-500 text-white'
-                            : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
-                        }`}
-                      >
-                        {isPinned ? '★' : '☆'}
-                      </button>
-                    </td>
-
-                    {/* CAN ID */}
-                    <td className="px-3 py-2 font-mono">
-                      <span className={`font-semibold ${isHighlighted ? 'text-sky-300' : 'text-slate-200'}`}>
-                        {s.idHex}
-                      </span>
-                      <span className="ml-2 text-slate-500 text-xs">({s.id})</span>
-                    </td>
-
-                    <td className="px-3 py-2 font-mono text-slate-300">{s.dlc}</td>
-                    <td className="px-3 py-2 font-mono text-slate-300">{s.frameCount.toLocaleString()}</td>
-                    <td className="px-3 py-2 font-mono text-slate-400 text-xs">{s.firstSeen.toLocaleString()}</td>
-                    <td className="px-3 py-2 font-mono text-slate-400 text-xs">{s.lastSeen.toLocaleString()}</td>
-
-                    {/* Status */}
-                    <td className="px-3 py-2">
-                      {s.isChanging ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-emerald-900/50 text-emerald-400 border border-emerald-800">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                          active
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-slate-800 text-slate-500 border border-slate-700">
-                          static
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Per-byte columns */}
-                    {Array.from({ length: maxDlc }, (_, i) => {
-                      const b = bytes[i]
-                      const exists = i < s.dlc
+      <div ref={scrollRef} className="overflow-auto flex-1">
+        {viewMode === 'raw' ? (
+          <table className="w-full text-sm border-collapse">
+            <thead className="sticky top-0 z-10 bg-slate-900 text-slate-400">
+              <tr>
+                <th className="px-3 py-2.5 text-left font-medium text-slate-600 w-16">#</th>
+                <th className="px-3 py-2.5 text-left font-medium whitespace-nowrap">Time (ms)</th>
+                <th className="px-3 py-2.5 text-left font-medium">CAN ID</th>
+                <th className="px-3 py-2.5 text-left font-medium">DLC</th>
+                {Array.from({ length: maxDlc }, (_, i) => (
+                  <th key={i} className={`px-3 py-2.5 text-left font-medium font-mono text-xs ${BYTE_TEXT_COLORS[i % BYTE_TEXT_COLORS.length]}`}>
+                    B{i + 1}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(() => {
+                const items = virtualizer.getVirtualItems()
+                const paddingTop = items.length > 0 ? items[0].start : 0
+                const paddingBottom = items.length > 0 ? virtualizer.getTotalSize() - items[items.length - 1].end : 0
+                const colSpan = 4 + maxDlc
+                return (
+                  <>
+                    {paddingTop > 0 && <tr><td style={{ height: paddingTop }} colSpan={colSpan} /></tr>}
+                    {items.map(vi => {
+                      const f = filteredFrames[vi.index]
+                      const isHighlighted = highlightedIds.has(f.id)
                       return (
-                        <td key={i} className="px-3 py-2 font-mono">
-                          {exists ? (
-                            <span
-                              className={`text-xs ${
-                                s.byteChangeMask[i] ? BYTE_TEXT_COLORS[i % BYTE_TEXT_COLORS.length] : 'text-slate-600'
-                              }`}
-                              title={`B${i + 1}: ${b} (${b})`}
-                            >
-                              {b.toString(16).toUpperCase().padStart(2, '0')}
+                        <tr
+                          key={vi.index}
+                          onClick={() => onToggleHighlight(f.id)}
+                          className={`border-b border-slate-800/40 cursor-pointer transition-colors
+                            ${isHighlighted ? 'bg-sky-900/20 hover:bg-sky-900/30' : 'hover:bg-slate-800/30'}
+                          `}
+                        >
+                          <td className="px-3 py-1.5 font-mono text-slate-600 text-xs">{vi.index + 1}</td>
+                          <td className="px-3 py-1.5 font-mono text-slate-400 text-xs">{f.timestamp.toLocaleString()}</td>
+                          <td className="px-3 py-1.5 font-mono">
+                            <span className={`font-semibold ${isHighlighted ? 'text-sky-300' : 'text-slate-200'}`}>
+                              {f.idHex}
                             </span>
-                          ) : null}
-                        </td>
+                            <span className="ml-2 text-slate-600 text-xs">({f.id})</span>
+                          </td>
+                          <td className="px-3 py-1.5 font-mono text-slate-400">{f.dlc}</td>
+                          {Array.from({ length: maxDlc }, (_, bi) => (
+                            <td key={bi} className="px-3 py-1.5 font-mono">
+                              {bi < f.bytes.length ? (
+                                <span className={`text-xs ${bi < f.dlc ? BYTE_TEXT_COLORS[bi % BYTE_TEXT_COLORS.length] : 'text-slate-600'}`}
+                                  title={bi >= f.dlc ? 'beyond DLC — CSV padding' : undefined}>
+                                  {f.bytes[bi].toString(16).toUpperCase().padStart(2, '0')}
+                                </span>
+                              ) : null}
+                            </td>
+                          ))}
+                        </tr>
                       )
                     })}
-
-                    {/* Bit expand toggle */}
-                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() => toggleBitRow(s.id)}
-                        title="Toggle bit breakdown"
-                        className={`
-                          text-xs px-2 py-1 rounded-md border transition-colors
-                          ${bitsOpen
-                            ? 'bg-fuchsia-900/40 border-fuchsia-700 text-fuchsia-300'
+                    {paddingBottom > 0 && <tr><td style={{ height: paddingBottom }} colSpan={colSpan} /></tr>}
+                  </>
+                )
+              })()}
+            </tbody>
+          </table>
+        ) : (
+          <table className="w-full text-sm border-collapse">
+            <thead className="sticky top-0 z-10 bg-slate-900 text-slate-400">
+              <tr>
+                <th className="w-10 px-3 py-2.5 text-left font-medium">Pin</th>
+                <th
+                  className="px-3 py-2.5 text-left font-medium cursor-pointer hover:text-slate-200 whitespace-nowrap"
+                  onClick={() => toggleSort('id')}
+                >
+                  CAN ID <SortIcon k="id" />
+                </th>
+                <th className="px-3 py-2.5 text-left font-medium">DLC</th>
+                <th
+                  className="px-3 py-2.5 text-left font-medium cursor-pointer hover:text-slate-200 whitespace-nowrap"
+                  onClick={() => toggleSort('count')}
+                >
+                  Frames <SortIcon k="count" />
+                </th>
+                <th
+                  className="px-3 py-2.5 text-left font-medium cursor-pointer hover:text-slate-200 whitespace-nowrap"
+                  onClick={() => toggleSort('firstSeen')}
+                >
+                  First (ms) <SortIcon k="firstSeen" />
+                </th>
+                <th className="px-3 py-2.5 text-left font-medium">Last (ms)</th>
+                <th className="px-3 py-2.5 text-left font-medium">Status</th>
+                {Array.from({ length: maxDlc }, (_, i) => (
+                  <th key={i} className={`px-3 py-2.5 text-left font-medium font-mono text-xs ${BYTE_TEXT_COLORS[i % BYTE_TEXT_COLORS.length]}`}>
+                    B{i + 1}
+                  </th>
+                ))}
+                <th className="px-3 py-2.5 text-left font-medium w-16"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredSummaries.map(s => {
+                const isHighlighted = highlightedIds.has(s.id)
+                const isPinned = filterIds.has(s.id)
+                const isExpanded = expandedIds.has(s.id)
+                const latestBytes = s.frames[s.frames.length - 1].bytes
+                return (
+                  <>
+                    <tr
+                      key={s.id}
+                      onClick={() => onToggleHighlight(s.id)}
+                      className={`border-b border-slate-800/60 cursor-pointer transition-colors
+                        ${isHighlighted ? 'bg-sky-900/30 hover:bg-sky-900/40' : 'hover:bg-slate-800/50'}
+                        ${isExpanded ? 'border-b-0' : ''}
+                      `}
+                    >
+                      <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
+                        <button
+                          onClick={() => onToggleFilter(s.id)}
+                          title={isPinned ? 'Remove filter' : 'Filter to this ID'}
+                          className={`w-6 h-6 rounded text-xs transition-colors ${isPinned ? 'bg-sky-500 text-white' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
+                        >
+                          {isPinned ? '★' : '☆'}
+                        </button>
+                      </td>
+                      <td className="px-3 py-2 font-mono">
+                        <span className={`font-semibold ${isHighlighted ? 'text-sky-300' : 'text-slate-200'}`}>
+                          {s.idHex}
+                        </span>
+                        <span className="ml-2 text-slate-500 text-xs">({s.id})</span>
+                      </td>
+                      <td className="px-3 py-2 font-mono text-slate-300">{s.dlc}</td>
+                      <td className="px-3 py-2 font-mono text-slate-300">{s.frameCount.toLocaleString()}</td>
+                      <td className="px-3 py-2 font-mono text-slate-400 text-xs">{s.firstSeen.toLocaleString()}</td>
+                      <td className="px-3 py-2 font-mono text-slate-400 text-xs">{s.lastSeen.toLocaleString()}</td>
+                      <td className="px-3 py-2">
+                        {s.isChanging ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-emerald-900/50 text-emerald-400 border border-emerald-800">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            active
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-slate-800 text-slate-500 border border-slate-700">
+                            static
+                          </span>
+                        )}
+                      </td>
+                      {Array.from({ length: maxDlc }, (_, i) => {
+                        const b = latestBytes[i]
+                        const exists = i < s.dlc
+                        return (
+                          <td key={i} className="px-3 py-2 font-mono">
+                            {exists ? (
+                              <span
+                                className={`text-xs ${s.byteChangeMask[i] ? BYTE_TEXT_COLORS[i % BYTE_TEXT_COLORS.length] : 'text-slate-600'}`}
+                                title={`B${i + 1}: 0x${b.toString(16).toUpperCase().padStart(2, '0')} (${b})`}
+                              >
+                                {b.toString(16).toUpperCase().padStart(2, '0')}
+                              </span>
+                            ) : null}
+                          </td>
+                        )
+                      })}
+                      <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
+                        <button
+                          onClick={() => toggleExpand(s.id)}
+                          title="Show all frames for this ID"
+                          className={`text-xs px-2 py-1 rounded-md border transition-colors ${isExpanded
+                            ? 'bg-sky-900/40 border-sky-700 text-sky-300'
                             : 'bg-slate-800 border-slate-700 text-slate-500 hover:border-slate-600 hover:text-slate-300'
-                          }
-                        `}
-                      >
-                        {bitsOpen ? '▲' : '▼'} bits
-                      </button>
-                    </td>
-                  </tr>
+                          }`}
+                        >
+                          {isExpanded ? '▲' : '▼'}
+                        </button>
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <FrameSubTable key={`sub-${s.id}`} frames={s.frames} maxDlc={maxDlc} />
+                    )}
+                  </>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
 
-                  {/* Expandable bit detail row */}
-                  {bitsOpen && (
-                    <BitDetailRow key={`bits-${s.id}`} summary={s} bytes={bytes} maxDlc={maxDlc} />
-                  )}
-                </>
-              )
-            })}
-          </tbody>
-        </table>
-
-        {filtered.length === 0 && (
+        {viewMode === 'raw' && filteredFrames.length === 0 && (
+          <div className="flex items-center justify-center h-48 text-slate-500">
+            No frames match current filters
+          </div>
+        )}
+        {viewMode === 'condensed' && filteredSummaries.length === 0 && (
           <div className="flex items-center justify-center h-48 text-slate-500">
             No IDs match current filters
           </div>

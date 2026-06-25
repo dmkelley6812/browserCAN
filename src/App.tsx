@@ -1,35 +1,71 @@
 import { useState, useMemo, useCallback } from "react";
 import { parseGvretCsv, buildIdSummaries } from "./utils/parseGvret";
-import type { CanIdSummary } from "./types";
+import { parseSlcanLog, isSlcanFormat } from "./utils/parseSlcan";
+import { useSerialCan } from "./hooks/useSerialCan";
+import type { BaudRate } from "./hooks/useSerialCan";
+import type { CanFrame, CanIdSummary } from "./types";
 import FileUpload from "./components/FileUpload";
+import LiveBar from "./components/LiveBar";
 import TableView from "./components/TableView";
 import GraphView from "./components/GraphView";
+import SignalScoutView from "./components/SignalScoutView";
 
 type Tab = "table" | "graph" | "signalscout";
 
 export default function App() {
-  const [summaries, setSummaries] = useState<CanIdSummary[] | null>(null);
+  // File-based data source
+  const [fileFrames, setFileFrames] = useState<CanFrame[] | null>(null);
+  const [fileSummaries, setFileSummaries] = useState<CanIdSummary[] | null>(null);
   const [fileName, setFileName] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+
+  // Live data source
+  const serial = useSerialCan();
+  const [isLiveMode, setIsLiveMode] = useState(false);
+
   const [activeTab, setActiveTab] = useState<Tab>("table");
   const [highlightedIds, setHighlightedIds] = useState<Set<number>>(new Set());
   const [filterIds, setFilterIds] = useState<Set<number>>(new Set());
 
+  // Active data — whichever source is in use
+  const frames = isLiveMode ? serial.frames : fileFrames;
+  const summaries = isLiveMode ? serial.summaries : fileSummaries;
+
   function handleFile(text: string, name: string) {
     try {
-      const frames = parseGvretCsv(text);
-      if (frames.length === 0) {
-        setError(
-          "No valid frames found. Check that the file is in GVRET CSV format.",
+      const parsed = isSlcanFormat(text) ? parseSlcanLog(text) : parseGvretCsv(text);
+      if (parsed.length === 0) {
+        setFileError(
+          "No valid frames found. Check that the file is in SLCAN or GVRET CSV format.",
         );
         return;
       }
-      setSummaries(buildIdSummaries(frames));
+      setFileFrames(parsed);
+      setFileSummaries(buildIdSummaries(parsed));
       setFileName(name);
-      setError(null);
+      setFileError(null);
     } catch (e) {
-      setError(`Parse error: ${e instanceof Error ? e.message : String(e)}`);
+      setFileError(`Parse error: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  function handleConnectLive(baudRate: BaudRate) {
+    setIsLiveMode(true);
+    setHighlightedIds(new Set());
+    setFilterIds(new Set());
+    serial.connect(baudRate);
+  }
+
+  async function handleDisconnectLive() {
+    await serial.disconnect();
+    setIsLiveMode(false);
+  }
+
+  function handleLoadNewFile() {
+    setFileFrames(null);
+    setFileSummaries(null);
+    setHighlightedIds(new Set());
+    setFilterIds(new Set());
   }
 
   const toggleHighlight = useCallback((id: number) => {
@@ -51,7 +87,7 @@ export default function App() {
   }, []);
 
   const stats = useMemo(() => {
-    if (!summaries) return null;
+    if (!summaries || summaries.length === 0) return null;
     const totalFrames = summaries.reduce((s, x) => s + x.frameCount, 0);
     const activeIds = summaries.filter((s) => s.isChanging).length;
     const tStart = Math.min(...summaries.map((s) => s.firstSeen));
@@ -64,15 +100,16 @@ export default function App() {
     };
   }, [summaries]);
 
-  if (!summaries) {
+  // Show FileUpload if not in live mode and no file loaded
+  if (!isLiveMode && !fileSummaries) {
     return (
       <>
-        {error && (
+        {fileError && (
           <div className="fixed top-4 left-1/2 -translate-x-1/2 bg-rose-900/80 border border-rose-700 text-rose-200 text-sm px-4 py-2 rounded-lg z-50">
-            {error}
+            {fileError}
           </div>
         )}
-        <FileUpload onFile={handleFile} />
+        <FileUpload onFile={handleFile} onConnectLive={handleConnectLive} />
       </>
     );
   }
@@ -86,9 +123,16 @@ export default function App() {
           browser<span className="text-sky-400">CAN</span>
         </span>
 
-        {/* File info */}
+        {/* Source info */}
         <div className="flex items-center gap-2 text-xs text-slate-500 border-l border-slate-700 pl-4">
-          <span className="text-slate-400">{fileName}</span>
+          {isLiveMode ? (
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-emerald-400 font-medium">Live</span>
+            </span>
+          ) : (
+            <span className="text-slate-400">{fileName}</span>
+          )}
         </div>
 
         {/* Stats */}
@@ -106,27 +150,40 @@ export default function App() {
               </span>{" "}
               frames
             </span>
-            <span>
-              <span className="text-slate-300">
-                {(stats.durationMs / 1000).toFixed(2)}s
-              </span>{" "}
-              capture
-            </span>
+            {!isLiveMode && (
+              <span>
+                <span className="text-slate-300">
+                  {(stats.durationMs / 1000).toFixed(2)}s
+                </span>{" "}
+                capture
+              </span>
+            )}
           </div>
         )}
 
-        {/* Clear */}
-        <button
-          onClick={() => {
-            setSummaries(null);
-            setHighlightedIds(new Set());
-            setFilterIds(new Set());
-          }}
-          className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-colors"
-        >
-          Load new file
-        </button>
+        {/* Action button */}
+        {isLiveMode ? null : (
+          <button
+            onClick={handleLoadNewFile}
+            className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-colors"
+          >
+            Load new file
+          </button>
+        )}
+
+        <a href="https://www.buymeacoffee.com/dk_dev" target="_blank" rel="noreferrer" className={isLiveMode ? "ml-auto" : ""}>
+          <img
+            src="https://img.buymeacoffee.com/button-api/?text=Buy me a beer&emoji=🍺&slug=dk_dev&button_colour=5F7FFF&font_colour=ffffff&font_family=Arial&outline_colour=000000&coffee_colour=FFDD00"
+            alt="Buy me a beer"
+            style={{ height: 28 }}
+          />
+        </a>
       </header>
+
+      {/* Live controls bar */}
+      {isLiveMode && (
+        <LiveBar serial={serial} onBack={handleDisconnectLive} />
+      )}
 
       {/* Tab bar */}
       <div className="flex items-center gap-1 px-5 py-2 border-b border-slate-800 flex-shrink-0 bg-slate-900/40">
@@ -143,7 +200,11 @@ export default function App() {
               }
             `}
           >
-            {tab === "table" ? "Frame Table" : tab === "graph" ? "Graph View" : "SignalScout"}
+            {tab === "table"
+              ? "Frame Table"
+              : tab === "graph"
+                ? "Graph View"
+                : "SignalScout"}
           </button>
         ))}
 
@@ -165,35 +226,47 @@ export default function App() {
       {/* Main content */}
       <main className="flex-1 overflow-hidden">
         {activeTab === "table" ? (
-          <TableView
-            summaries={summaries}
-            highlightedIds={highlightedIds}
-            onToggleHighlight={toggleHighlight}
-            filterIds={filterIds}
-            onToggleFilter={toggleFilter}
-          />
+          summaries && summaries.length > 0 ? (
+            <TableView
+              frames={frames!}
+              summaries={summaries}
+              highlightedIds={highlightedIds}
+              onToggleHighlight={toggleHighlight}
+              filterIds={filterIds}
+              onToggleFilter={toggleFilter}
+            />
+          ) : (
+            <WaitingForFrames isLiveMode={isLiveMode} />
+          )
         ) : activeTab === "graph" ? (
-          <GraphView
-            summaries={summaries}
-            highlightedIds={highlightedIds}
-            filterIds={filterIds}
-          />
+          summaries && summaries.length > 0 ? (
+            <GraphView
+              summaries={summaries}
+              highlightedIds={highlightedIds}
+              filterIds={filterIds}
+            />
+          ) : (
+            <WaitingForFrames isLiveMode={isLiveMode} />
+          )
         ) : (
-          <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-8">
-            <div className="text-4xl font-bold tracking-tight text-slate-200">
-              Signal<span className="text-sky-400">Scout</span>
-            </div>
-            <p className="text-slate-400 text-sm max-w-md">
-              Coming soon — live signal tracking to help reverse engineer CAN signals in real time.
-              Watch individual bytes across multiple IDs simultaneously, annotate signals with labels,
-              and detect patterns as your vehicle responds to inputs.
-            </p>
-            <span className="text-xs text-slate-600 border border-slate-800 rounded-full px-3 py-1">
-              In development
-            </span>
-          </div>
+          <SignalScoutView summaries={summaries ?? []} isLiveMode={isLiveMode} />
         )}
       </main>
+    </div>
+  );
+}
+
+function WaitingForFrames({ isLiveMode }: { isLiveMode: boolean }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-600">
+      {isLiveMode ? (
+        <>
+          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <p className="text-sm">Waiting for CAN frames...</p>
+        </>
+      ) : (
+        <p className="text-sm">No frames to display.</p>
+      )}
     </div>
   );
 }

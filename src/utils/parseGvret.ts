@@ -32,7 +32,7 @@ export function parseGvretCsv(text: string): CanFrame[] {
         parseInt(row.D6) || 0,
         parseInt(row.D7) || 0,
         parseInt(row.D8) || 0,
-      ].slice(0, Math.max(dlc, 0))
+      ]
 
       const id = parseInt(row.ID)
       return {
