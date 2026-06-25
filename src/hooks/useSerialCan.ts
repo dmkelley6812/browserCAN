@@ -110,7 +110,7 @@ export function useSerialCan(): UseSerialCanReturn {
         if (done) break
         if (value) {
           lineBuffer += decoder.decode(value, { stream: true })
-          const parts = lineBuffer.split('\r')
+          const parts = lineBuffer.split(/\r\n|\r|\n/)
           lineBuffer = parts.pop() ?? ''
           for (const part of parts) {
             const frame = parseSingleSlcanFrame(part.trim())
