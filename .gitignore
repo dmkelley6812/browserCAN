@@ -7,3 +7,5 @@ dist-ssr/
 !.env.example
 CANDATA.csv
 .claude
+CLAUDE.md
+data2.csv
