@@ -4,20 +4,29 @@
 
 Load a log file or plug in a SLCAN adapter and start reverse engineering CAN signals immediately. Built as a personal tool for truck CAN data analysis; shared openly in case it's useful to others.
 
-> **Personal project** — open source as-is. I don't plan to actively maintain this, respond to issues, or review PRs. Use it, fork it, do whatever you like.
+> **This is a Personal project** — open source as-is. I can't guarantee I'll be super active in responding to issues or PRs. If you find it useful, feel free to...
+> 
+  [![Buy Me A Beer](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20beer&emoji=%F0%9F%8D%BA&slug=dk_dev&button_colour=5F7FFF&font_colour=ffffff&font_family=Arial&outline_colour=000000&coffee_colour=FFDD00)](https://www.buymeacoffee.com/dk_dev)
 
 ---
 
 ## Screenshots
+<img width="2546" height="1268" alt="Screenshot 2026-06-26 134957" src="https://github.com/user-attachments/assets/4ff941be-2e1d-487b-933a-fc2b1ebf978d" />
 
-> _Add screenshots here. Suggested shots:_
-> - `docs/screenshots/upload.png` — the file/connect landing screen
-> - `docs/screenshots/frame-table.png` — Frame Table view with a file loaded
-> - `docs/screenshots/graph-view.png` — Graph View showing multi-byte waveforms
-> - `docs/screenshots/signal-scout.png` — SignalScout in live mode with byte highlighting active
-> - `docs/screenshots/frame-builder.png` — Frame Builder modal with bit-toggle open
+<img width="2540" height="1269" alt="Screenshot 2026-06-26 134940" src="https://github.com/user-attachments/assets/dffaac1e-744c-4b73-bd17-29e3c0bae43d" />
 
-_To add: take screenshots while the app is running, drop them into a `docs/screenshots/` folder, and replace this block with standard markdown image tags._
+<img width="2531" height="746" alt="Screenshot 2026-06-26 134927" src="https://github.com/user-attachments/assets/561ca731-375e-4bf7-90c4-ea0b218fca21" />
+
+<img width="2546" height="1267" alt="Screenshot 2026-06-26 134918" src="https://github.com/user-attachments/assets/21ea1b66-c3e8-4620-8c54-a0b5e0e4b8d2" />
+
+
+<img width="2544" height="1266" alt="Screenshot 2026-06-26 134901" src="https://github.com/user-attachments/assets/ace7686e-1750-44f5-a3eb-75b65dca1254" />
+
+
+
+
+
+
 
 ---
 
@@ -55,12 +64,12 @@ A modal for constructing and transmitting CAN frames over an active SLCAN connec
 
 ---
 
-## Supported input formats
+## Currently Supported input formats
 
 | Format | How |
 |---|---|
 | **GVRET CSV** | Drag & drop `.csv` files captured with a GVRET-compatible logger (e.g. ESP32RET, Macchina A0) |
-| **SLCAN log** | Drag & drop `.txt` / `.log` files in SLCAN text format |
+| **SLCAN log** | Drag & drop `.csv` / `.txt` / `.log` files in SLCAN text format |
 | **Live SLCAN** | Connect a SLCAN-compatible USB adapter via Web Serial (Chrome/Edge only) |
 
 ### Compatible live adapters
@@ -70,7 +79,7 @@ Any adapter that speaks SLCAN over USB serial should work:
 - USBtin
 - PEAK PCAN-USB (SLCAN firmware)
 - Macchina A0
-- ESP32 with SLCAN firmware (e.g. ESP32RET, WICAN)
+- ESP32 with SLCAN firmware (See https://github.com/mintynet/esp32-slcan)
 
 ---
 
