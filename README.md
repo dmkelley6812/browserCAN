@@ -72,6 +72,8 @@ A modal for constructing and transmitting CAN frames over an active SLCAN connec
 | **SLCAN log** | Drag & drop `.csv` / `.txt` / `.log` files in SLCAN text format |
 | **Live SLCAN** | Connect a SLCAN-compatible USB adapter via Web Serial (Chrome/Edge only) |
 
+** Note: I've only tested so far with my own version of GVRET and with the esp32-slcan TWAI firmware.**
+
 ### Compatible live adapters
 
 Any adapter that speaks SLCAN over USB serial should work:
@@ -80,6 +82,9 @@ Any adapter that speaks SLCAN over USB serial should work:
 - PEAK PCAN-USB (SLCAN firmware)
 - Macchina A0
 - ESP32 with SLCAN firmware (See https://github.com/mintynet/esp32-slcan)
+
+- ** Note: I've only tested so far with my own version of GVRET and with the esp32-slcan TWAI firmware. Others should work, but proceed/purchase at your own risk**
+
 
 ---
 
