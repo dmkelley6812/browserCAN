@@ -1,4 +1,5 @@
 import { useState, useRef, useMemo, useEffect } from 'react'
+import { useSessionState, useSessionSetState } from '../hooks/useSessionState'
 import type { CanIdSummary } from '../types'
 
 type SortField = 'id' | 'hz' | 'count' | 'activity' | 'burst'
@@ -19,24 +20,32 @@ interface SummaryWithHz extends CanIdSummary {
 interface Props {
   summaries: CanIdSummary[]
   isLiveMode: boolean
+  recentTxIds: Set<number>
+  onOpenBuilder: (seed: { id: number; extended: boolean; bytes: number[] }) => void
+  favoritedIds: Set<number>
+  onToggleFavorite: (id: number) => void
 }
 
-export default function SignalScoutView({ summaries, isLiveMode }: Props) {
-  const [sortField, setSortField] = useState<SortField>('id')
-  const [sortDir, setSortDir] = useState<SortDir>('asc')
-  const [minHz, setMinHz] = useState('')
-  const [maxHz, setMaxHz] = useState('')
-  const [changingOnly, setChangingOnly] = useState(false)
+export default function SignalScoutView({ summaries, isLiveMode, recentTxIds, onOpenBuilder, favoritedIds, onToggleFavorite }: Props) {
+  const [sortField, setSortField] = useSessionState<SortField>('canvision-scout-sortfield', 'id')
+  const [sortDir, setSortDir] = useSessionState<SortDir>('canvision-scout-sortdir', 'asc')
+  const [minHz, setMinHz] = useSessionState('canvision-scout-minhz', '')
+  const [maxHz, setMaxHz] = useSessionState('canvision-scout-maxhz', '')
+  const [changingOnly, setChangingOnly] = useSessionState('canvision-scout-changingonly', false)
 
-  // Feature 2: Snapshot / delta mode
+  // Feature 2: Snapshot / delta mode — ephemeral, not persisted
   const [snapshot, setSnapshot] = useState<Map<number, number[]> | null>(null)
 
   // Feature 3: Burst counter
-  const [burstEnabled, setBurstEnabled] = useState(false)
-  const [burstWindowSec, setBurstWindowSec] = useState<BurstWindow>(2)
+  const [burstEnabled, setBurstEnabled] = useSessionState('canvision-scout-burstenabled', false)
+  const [burstWindowSec, setBurstWindowSec] = useSessionState<BurstWindow>('canvision-scout-burstwindow', 2)
 
   // Ignore list: hide individual IDs from the table
-  const [ignoredIds, setIgnoredIds] = useState<Set<number>>(new Set())
+  const [ignoredIds, setIgnoredIds] = useSessionSetState('canvision-scout-ignoredids')
+  const [starredOnly, setStarredOnly] = useSessionState('canvision-scout-starredonly', false)
+
+  const [groupByFreq, setGroupByFreq] = useSessionState('canvision-scout-groupbyfreq', false)
+  const [collapsedFreqGroups, setCollapsedFreqGroups] = useState<Set<'high' | 'medium' | 'low'>>(new Set())
 
   const prevBytesRef = useRef<Map<number, number[]>>(new Map())
   // Feature 1: tracks when each ID last had a byte change (for float-to-top sort)
@@ -116,6 +125,7 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
     const lo = parseFloat(minHz)
     const hi = parseFloat(maxHz)
     r = r.filter(s => !ignoredIds.has(s.id))
+    if (starredOnly) r = r.filter(s => favoritedIds.has(s.id))
     if (isLiveMode && !isNaN(lo)) r = r.filter(s => s.hz >= lo)
     if (isLiveMode && !isNaN(hi)) r = r.filter(s => s.hz <= hi)
     if (changingOnly) r = r.filter(s => s.isChanging)
@@ -130,7 +140,7 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
       })
     }
     return r
-  }, [summariesWithHz, minHz, maxHz, changingOnly, isLiveMode, snapshot])
+  }, [summariesWithHz, minHz, maxHz, changingOnly, isLiveMode, snapshot, starredOnly, favoritedIds])
 
   const sorted = useMemo(() => {
     // Activity sort reads lastChangedAtMap ref — re-runs whenever filtered changes (each frame batch)
@@ -151,8 +161,13 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
   }, [filtered, sortField, sortDir, burstMap])
 
   function handleSort(field: SortField) {
-    if (sortField === field && field !== 'activity' && field !== 'burst') {
-      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    if (sortField === field) {
+      if (field === 'activity' || field === 'burst') {
+        setSortField('id')
+        setSortDir('asc')
+      } else {
+        setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+      }
     } else {
       setSortField(field)
       setSortDir(field === 'id' ? 'asc' : 'desc')
@@ -206,6 +221,130 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
     if (count < 3) return 'text-yellow-500'
     if (count < 8) return 'text-orange-400'
     return 'text-red-400'
+  }
+
+  function getGroupHz(s: CanIdSummary): number {
+    const dMs = s.lastSeen - s.firstSeen
+    return dMs > 100 ? s.frameCount / (dMs / 1000) : 0
+  }
+  function freqBand(hz: number): 'high' | 'medium' | 'low' {
+    if (hz >= 10) return 'high'
+    if (hz >= 1) return 'medium'
+    return 'low'
+  }
+  function toggleFreqGroup(g: 'high' | 'medium' | 'low') {
+    setCollapsedFreqGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(g)) next.delete(g)
+      else next.add(g)
+      return next
+    })
+  }
+
+  const FREQ_BANDS = [
+    { key: 'high' as const, label: 'High  ≥10 Hz', color: 'text-red-400' },
+    { key: 'medium' as const, label: 'Medium  1–10 Hz', color: 'text-amber-400' },
+    { key: 'low' as const, label: 'Low  <1 Hz', color: 'text-slate-400' },
+  ]
+
+  function renderScoutRow(s: SummaryWithHz) {
+    const last = s.frames[s.frames.length - 1]
+    const bytes = last?.bytes ?? Array(8).fill(0)
+    const changed = changedMap.get(s.id) ?? Array(8).fill(false)
+    const snapDiff = snapshotDiffMap.get(s.id) ?? Array(8).fill(false)
+    const burstCount = burstMap.get(s.id) ?? 0
+    const isFavorited = favoritedIds.has(s.id)
+    return (
+      <tr
+        key={s.id}
+        className={`hover:bg-slate-800/30 transition-colors group border-b border-slate-800/40 ${isFavorited ? 'bg-amber-500/5' : ''}`}
+      >
+        <td className="px-4 py-1.5 font-mono text-sky-300 whitespace-nowrap border-b border-slate-800/30">
+          {s.idHex}
+          {s.frames[0]?.extended && (
+            <span className="ml-1.5 text-[10px] text-slate-600 font-normal">ext</span>
+          )}
+          {recentTxIds.has(s.id) && (
+            <span className="ml-1.5 text-[10px] font-normal text-violet-400 bg-violet-900/30 border border-violet-800/50 px-1 rounded">TX</span>
+          )}
+        </td>
+        <td className="px-3 py-1.5 text-center font-mono text-slate-600 border-b border-slate-800/30">
+          {s.dlc}
+        </td>
+        <td className={`px-3 py-1.5 text-right font-mono tabular-nums border-b border-slate-800/30 ${s.isChanging && isLiveMode ? 'text-slate-300' : 'text-slate-600'}`}>
+          {formatHz(s.hz)}
+        </td>
+        <td className="px-3 py-1.5 text-right font-mono tabular-nums text-slate-500 border-b border-slate-800/30">
+          {s.frameCount.toLocaleString()}
+        </td>
+        {burstEnabled && (
+          <td className={`px-3 py-1.5 text-right font-mono tabular-nums border-b border-slate-800/30 ${burstHeatClass(burstCount)}`}>
+            {burstCount > 0 ? burstCount : '—'}
+          </td>
+        )}
+        {Array.from({ length: 8 }, (_, i) => {
+          const b = bytes[i] ?? 0
+          const isLiveChanged = isLiveMode && changed[i]
+          const isSnapDiff = !!snapshot && snapDiff[i]
+          const isStatic = !s.byteChangeMask[i]
+          const inRange = i < s.dlc
+          return (
+            <td
+              key={i}
+              className={`
+                px-1 py-1.5 text-center font-mono tabular-nums w-10
+                transition-colors duration-100 border-b border-slate-800/30
+                ${!inRange
+                  ? 'text-slate-800'
+                  : isSnapDiff
+                    ? 'bg-orange-500/20 text-orange-200 font-semibold'
+                    : isLiveChanged
+                      ? 'bg-yellow-500/20 text-yellow-100 font-semibold'
+                      : isStatic
+                        ? 'text-slate-700'
+                        : BYTE_COLORS[i]
+                }
+              `}
+            >
+              {inRange ? b.toString(16).toUpperCase().padStart(2, '0') : '··'}
+            </td>
+          )
+        })}
+        <td className="px-2 py-1.5 border-b border-slate-800/30">
+          <div className="flex items-center gap-1">
+            <button
+              title={isFavorited ? 'Remove from favorites' : 'Add to favorites'}
+              className={`text-[13px] leading-none px-1 py-0.5 rounded border border-transparent transition-all ${
+                isFavorited
+                  ? 'text-amber-400 hover:text-amber-300'
+                  : 'opacity-0 group-hover:opacity-100 text-slate-600 hover:text-amber-400'
+              }`}
+              onClick={() => onToggleFavorite(s.id)}
+            >
+              {isFavorited ? '★' : '☆'}
+            </button>
+            <button
+              title="Ignore — hide this ID from SignalScout"
+              className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-600 hover:text-rose-400 px-1.5 py-0.5 rounded border border-transparent hover:border-rose-900 text-[11px] leading-none"
+              onClick={() => toggleIgnore(s.id)}
+            >
+              ⊘
+            </button>
+            <button
+              title="Open in Frame Builder"
+              className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-600 hover:text-violet-400 px-1.5 py-0.5 rounded border border-transparent hover:border-violet-900 text-[11px] leading-none"
+              onClick={() => onOpenBuilder({
+                id: s.id,
+                extended: s.frames[0]?.extended ?? false,
+                bytes: last?.bytes ?? Array(s.dlc).fill(0),
+              })}
+            >
+              →
+            </button>
+          </div>
+        </td>
+      </tr>
+    )
   }
 
   return (
@@ -263,6 +402,23 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
           }`}
         >
           Active only
+        </button>
+
+        {/* Starred filter */}
+        <button
+          onClick={() => setStarredOnly(s => !s)}
+          className={`text-xs px-3 py-1 rounded-lg border transition-colors flex items-center gap-1.5 ${
+            starredOnly
+              ? 'bg-amber-600/20 border-amber-700/50 text-amber-300'
+              : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600'
+          }`}
+        >
+          {starredOnly ? '★' : '☆'} Starred
+          {favoritedIds.size > 0 && (
+            <span className={`tabular-nums ${starredOnly ? 'text-amber-400' : 'text-amber-600'}`}>
+              {favoritedIds.size}
+            </span>
+          )}
         </button>
 
         {/* Feature 1: Float to top */}
@@ -343,6 +499,17 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
           ))}
         </div>
 
+        <button
+          onClick={() => setGroupByFreq(g => !g)}
+          className={`text-xs px-3 py-1 rounded-lg border transition-colors ${
+            groupByFreq
+              ? 'bg-indigo-600/20 border-indigo-700/50 text-indigo-300'
+              : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600'
+          }`}
+        >
+          Group by Hz
+        </button>
+
         {/* Legend */}
         {isLiveMode && (
           <span className="ml-auto flex items-center gap-2 text-xs text-slate-600">
@@ -397,95 +564,36 @@ export default function SignalScoutView({ summaries, isLiveMode }: Props) {
                   key={i}
                   className={`px-2 py-2 text-center font-medium border-b border-slate-800 w-10 ${BYTE_COLORS[i]}/40`}
                 >
-                  D{i}
+                  B{i + 1}
                 </th>
               ))}
               <th className="px-3 py-2 border-b border-slate-800 w-14" />
             </tr>
           </thead>
           <tbody>
-            {sorted.map(s => {
-              const last = s.frames[s.frames.length - 1]
-              const bytes = last?.bytes ?? Array(8).fill(0)
-              const changed = changedMap.get(s.id) ?? Array(8).fill(false)
-              const snapDiff = snapshotDiffMap.get(s.id) ?? Array(8).fill(false)
-              const burstCount = burstMap.get(s.id) ?? 0
-
-              return (
-                <tr
-                  key={s.id}
-                  className="hover:bg-slate-800/30 transition-colors group border-b border-slate-800/40"
-                >
-                  <td className="px-4 py-1.5 font-mono text-sky-300 whitespace-nowrap border-b border-slate-800/30">
-                    {s.idHex}
-                    {s.frames[0]?.extended && (
-                      <span className="ml-1.5 text-[10px] text-slate-600 font-normal">ext</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-1.5 text-center font-mono text-slate-600 border-b border-slate-800/30">
-                    {s.dlc}
-                  </td>
-                  <td className={`px-3 py-1.5 text-right font-mono tabular-nums border-b border-slate-800/30 ${s.isChanging && isLiveMode ? 'text-slate-300' : 'text-slate-600'}`}>
-                    {formatHz((s as SummaryWithHz).hz)}
-                  </td>
-                  <td className="px-3 py-1.5 text-right font-mono tabular-nums text-slate-500 border-b border-slate-800/30">
-                    {s.frameCount.toLocaleString()}
-                  </td>
-                  {burstEnabled && (
-                    <td className={`px-3 py-1.5 text-right font-mono tabular-nums border-b border-slate-800/30 ${burstHeatClass(burstCount)}`}>
-                      {burstCount > 0 ? burstCount : '—'}
-                    </td>
-                  )}
-                  {Array.from({ length: 8 }, (_, i) => {
-                    const b = bytes[i] ?? 0
-                    const isLiveChanged = isLiveMode && changed[i]
-                    const isSnapDiff = !!snapshot && snapDiff[i]
-                    const isStatic = !s.byteChangeMask[i]
-                    const inRange = i < s.dlc
-
-                    return (
-                      <td
-                        key={i}
-                        className={`
-                          px-1 py-1.5 text-center font-mono tabular-nums w-10
-                          transition-colors duration-100 border-b border-slate-800/30
-                          ${!inRange
-                            ? 'text-slate-800'
-                            : isSnapDiff
-                              ? 'bg-orange-500/20 text-orange-200 font-semibold'
-                              : isLiveChanged
-                                ? 'bg-yellow-500/20 text-yellow-100 font-semibold'
-                                : isStatic
-                                  ? 'text-slate-700'
-                                  : BYTE_COLORS[i]
-                          }
-                        `}
-                      >
-                        {inRange ? b.toString(16).toUpperCase().padStart(2, '0') : '··'}
+            {(groupByFreq
+              ? FREQ_BANDS.flatMap(({ key, label, color }) => {
+                  const items = sorted.filter(s => freqBand(getGroupHz(s)) === key)
+                  if (items.length === 0) return []
+                  const collapsed = collapsedFreqGroups.has(key)
+                  return [
+                    <tr key={`grp-${key}`}>
+                      <td colSpan={100} className="px-4 py-1 bg-slate-950/60 border-b border-slate-800/60">
+                        <button
+                          onClick={() => toggleFreqGroup(key)}
+                          className="flex items-center gap-2 text-xs w-full text-left hover:text-slate-200 transition-colors select-none"
+                        >
+                          <span className="text-slate-600 text-[10px]">{collapsed ? '▶' : '▼'}</span>
+                          <span className={`font-semibold ${color}`}>{label}</span>
+                          <span className="text-slate-600">· {items.length} ID{items.length !== 1 ? 's' : ''}</span>
+                        </button>
                       </td>
-                    )
-                  })}
-                  <td className="px-2 py-1.5 border-b border-slate-800/30">
-                    <div className="flex items-center gap-1">
-                      <button
-                        title="Ignore — hide this ID from SignalScout"
-                        className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-600 hover:text-rose-400 px-1.5 py-0.5 rounded border border-transparent hover:border-rose-900 text-[11px] leading-none"
-                        onClick={() => toggleIgnore(s.id)}
-                      >
-                        ⊘
-                      </button>
-                      <button
-                        title="Frame Builder — coming soon"
-                        className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-600 hover:text-sky-400 px-1.5 py-0.5 rounded border border-transparent hover:border-sky-900 text-[11px] leading-none"
-                        onClick={() => {}}
-                      >
-                        →
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
+                    </tr>,
+                    ...(collapsed ? [] : items.map(renderScoutRow)),
+                  ]
+                })
+              : sorted.map(renderScoutRow)
+            )}
           </tbody>
         </table>
 

@@ -3,12 +3,15 @@ import { parseGvretCsv, buildIdSummaries } from "./utils/parseGvret";
 import { parseSlcanLog, isSlcanFormat } from "./utils/parseSlcan";
 import { useSerialCan } from "./hooks/useSerialCan";
 import type { BaudRate, SerialBaud } from "./hooks/useSerialCan";
+import { useSessionState, useSessionSetState } from "./hooks/useSessionState";
 import type { CanFrame, CanIdSummary } from "./types";
 import FileUpload from "./components/FileUpload";
 import LiveBar from "./components/LiveBar";
 import TableView from "./components/TableView";
 import GraphView from "./components/GraphView";
 import SignalScoutView from "./components/SignalScoutView";
+import FrameBuilderModal from "./components/FrameBuilderModal";
+import type { FrameBuilderSeed } from "./components/FrameBuilderModal";
 
 type Tab = "table" | "graph" | "signalscout";
 
@@ -23,9 +26,15 @@ export default function App() {
   const serial = useSerialCan();
   const [isLiveMode, setIsLiveMode] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<Tab>("table");
-  const [highlightedIds, setHighlightedIds] = useState<Set<number>>(new Set());
-  const [filterIds, setFilterIds] = useState<Set<number>>(new Set());
+  const [activeTab, setActiveTab] = useSessionState<Tab>("canvision-active-tab", "table");
+  const [highlightedIds, setHighlightedIds] = useSessionSetState("canvision-highlighted-ids");
+  const [filterIds, setFilterIds] = useSessionSetState("canvision-filter-ids");
+  const [favoritedIds, setFavoritedIds] = useSessionSetState("canvision-favorites");
+  const [builderSeed, setBuilderSeed] = useState<FrameBuilderSeed | null>(null);
+
+  const openBuilder = useCallback((seed?: FrameBuilderSeed) => {
+    setBuilderSeed(seed ?? { id: 0, extended: false, bytes: Array(8).fill(0) });
+  }, []);
 
   // Active data — whichever source is in use
   const frames = isLiveMode ? serial.frames : fileFrames;
@@ -79,6 +88,15 @@ export default function App() {
 
   const toggleFilter = useCallback((id: number) => {
     setFilterIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleFavorite = useCallback((id: number) => {
+    setFavoritedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -182,7 +200,7 @@ export default function App() {
 
       {/* Live controls bar */}
       {isLiveMode && (
-        <LiveBar serial={serial} onBack={handleDisconnectLive} />
+        <LiveBar serial={serial} onBack={handleDisconnectLive} onOpenBuilder={() => openBuilder()} />
       )}
 
       {/* Tab bar */}
@@ -234,6 +252,7 @@ export default function App() {
               onToggleHighlight={toggleHighlight}
               filterIds={filterIds}
               onToggleFilter={toggleFilter}
+              onOpenBuilder={openBuilder}
             />
           ) : (
             <WaitingForFrames isLiveMode={isLiveMode} />
@@ -244,14 +263,29 @@ export default function App() {
               summaries={summaries}
               highlightedIds={highlightedIds}
               filterIds={filterIds}
+              onOpenBuilder={openBuilder}
             />
           ) : (
             <WaitingForFrames isLiveMode={isLiveMode} />
           )
         ) : (
-          <SignalScoutView summaries={summaries ?? []} isLiveMode={isLiveMode} />
+          <SignalScoutView
+            summaries={summaries ?? []}
+            isLiveMode={isLiveMode}
+            recentTxIds={serial.recentTxIds}
+            onOpenBuilder={openBuilder}
+            favoritedIds={favoritedIds}
+            onToggleFavorite={toggleFavorite}
+          />
         )}
       </main>
+
+      <FrameBuilderModal
+        seed={builderSeed}
+        onClose={() => setBuilderSeed(null)}
+        isConnected={serial.status === "connected"}
+        sendFrame={serial.sendFrame}
+      />
     </div>
   );
 }

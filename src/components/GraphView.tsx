@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { useSessionState } from '../hooks/useSessionState'
 import type { CanIdSummary } from '../types'
 import CanIdRow from './CanIdRow'
 
@@ -6,15 +7,18 @@ interface Props {
   summaries: CanIdSummary[]
   highlightedIds: Set<number>
   filterIds: Set<number>
+  onOpenBuilder: (seed: { id: number; extended: boolean; bytes: number[] }) => void
 }
 
-export default function GraphView({ summaries, highlightedIds, filterIds }: Props) {
+export default function GraphView({ summaries, highlightedIds, filterIds, onOpenBuilder }: Props) {
   const [expandAll, setExpandAll] = useState(false)
-  const [hideStatic, setHideStatic] = useState(false)
+  const [hideStatic, setHideStatic] = useSessionState('canvision-graph-hide-static', false)
   const [showOnlyFiltered, setShowOnlyFiltered] = useState(filterIds.size > 0)
-  const [searchTerm, setSearchTerm] = useState('')
+  const [searchTerm, setSearchTerm] = useSessionState('canvision-graph-search', '')
   // Track global expand key so we can reset individual row state
   const [expandKey, setExpandKey] = useState(0)
+  const [groupByFreq, setGroupByFreq] = useSessionState('canvision-graph-groupbyfreq', false)
+  const [collapsedFreqGroups, setCollapsedFreqGroups] = useState<Set<'high' | 'medium' | 'low'>>(new Set())
 
   const visible = useMemo(() => {
     let list = summaries
@@ -39,6 +43,30 @@ export default function GraphView({ summaries, highlightedIds, filterIds }: Prop
     setExpandAll(false)
     setExpandKey((k) => k + 1)
   }
+
+  function getGroupHz(s: CanIdSummary): number {
+    const dMs = s.lastSeen - s.firstSeen
+    return dMs > 100 ? s.frameCount / (dMs / 1000) : 0
+  }
+  function freqBand(hz: number): 'high' | 'medium' | 'low' {
+    if (hz >= 10) return 'high'
+    if (hz >= 1) return 'medium'
+    return 'low'
+  }
+  function toggleFreqGroup(g: 'high' | 'medium' | 'low') {
+    setCollapsedFreqGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(g)) next.delete(g)
+      else next.add(g)
+      return next
+    })
+  }
+
+  const FREQ_BANDS = [
+    { key: 'high' as const, label: 'High  ≥10 Hz', color: 'text-red-400' },
+    { key: 'medium' as const, label: 'Medium  1–10 Hz', color: 'text-amber-400' },
+    { key: 'low' as const, label: 'Low  <1 Hz', color: 'text-slate-400' },
+  ]
 
   return (
     <div className="flex flex-col h-full">
@@ -74,6 +102,17 @@ export default function GraphView({ summaries, highlightedIds, filterIds }: Prop
           </label>
         )}
 
+        <button
+          onClick={() => setGroupByFreq(g => !g)}
+          className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+            groupByFreq
+              ? 'bg-indigo-600/20 border-indigo-700/50 text-indigo-300'
+              : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-600'
+          }`}
+        >
+          Group by Hz
+        </button>
+
         <div className="ml-auto flex items-center gap-2">
           <span className="text-xs text-slate-500">{visible.length} IDs</span>
           <button
@@ -97,6 +136,35 @@ export default function GraphView({ summaries, highlightedIds, filterIds }: Prop
           <div className="flex items-center justify-center h-48 text-slate-500">
             No IDs match current filters
           </div>
+        ) : groupByFreq ? (
+          FREQ_BANDS.flatMap(({ key, label, color }) => {
+            const items = visible.filter(s => freqBand(getGroupHz(s)) === key)
+            if (items.length === 0) return []
+            const collapsed = collapsedFreqGroups.has(key)
+            return [
+              <div
+                key={`grp-${key}`}
+                className="flex items-center gap-2 px-1 py-2 mb-1 border-b border-slate-800/60 cursor-pointer hover:bg-slate-800/20 transition-colors select-none"
+                onClick={() => toggleFreqGroup(key)}
+              >
+                <span className="text-slate-600 text-[10px]">{collapsed ? '▶' : '▼'}</span>
+                <span className={`text-sm font-semibold ${color}`}>{label}</span>
+                <span className="text-xs text-slate-600">· {items.length} ID{items.length !== 1 ? 's' : ''}</span>
+              </div>,
+              ...(collapsed
+                ? []
+                : items.map(s => (
+                    <CanIdRow
+                      key={`${s.id}-${expandKey}`}
+                      summary={s}
+                      isHighlighted={highlightedIds.has(s.id)}
+                      defaultExpanded={expandAll}
+                      onOpenBuilder={onOpenBuilder}
+                    />
+                  ))
+              ),
+            ]
+          })
         ) : (
           visible.map((s) => (
             <CanIdRow
@@ -104,6 +172,7 @@ export default function GraphView({ summaries, highlightedIds, filterIds }: Prop
               summary={s}
               isHighlighted={highlightedIds.has(s.id)}
               defaultExpanded={expandAll}
+              onOpenBuilder={onOpenBuilder}
             />
           ))
         )}

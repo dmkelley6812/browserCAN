@@ -7,6 +7,8 @@ export const BYTE_COLORS = [
   '#f87171', '#22d3ee', '#a3e635', '#e879f9',
 ]
 
+const DOWNSAMPLE_THRESHOLD = 500
+
 interface Props {
   frames: CanFrame[]
   visibleBytes: Set<number>
@@ -15,10 +17,11 @@ interface Props {
   singleByte?: number
   title?: string
   autoScale?: boolean
+  downsample?: boolean
 }
 
 export default function ByteGraph({
-  frames, visibleBytes, byteCount, height = 200, singleByte, title, autoScale = false,
+  frames, visibleBytes, byteCount, height = 200, singleByte, title, autoScale = false, downsample = true,
 }: Props) {
   const byteIndices = useMemo(() => (
     singleByte !== undefined
@@ -49,6 +52,7 @@ export default function ByteGraph({
       name: `B${byteIdx + 1}`,
       type: 'line',
       data: frames.map((f) => f.bytes[byteIdx] ?? 0),
+      sampling: downsample && frames.length > DOWNSAMPLE_THRESHOLD ? 'lttb' : undefined,
       smooth: false,
       showSymbol: frames.length < 80,
       symbolSize: 3,
@@ -139,7 +143,7 @@ export default function ByteGraph({
       ],
       series,
     }
-  }, [frames, byteIndices, title, yMin, yMax])
+  }, [frames, byteIndices, title, yMin, yMax, downsample])
 
   return (
     <ReactECharts

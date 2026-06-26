@@ -16,12 +16,14 @@ interface Props {
   summary: CanIdSummary
   isHighlighted: boolean
   defaultExpanded?: boolean
+  onOpenBuilder?: (seed: { id: number; extended: boolean; bytes: number[] }) => void
 }
 
-export default function CanIdRow({ summary, isHighlighted, defaultExpanded = false }: Props) {
+export default function CanIdRow({ summary, isHighlighted, defaultExpanded = false, onOpenBuilder }: Props) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [expandedBytes, setExpandedBytes] = useState(false)
   const [autoScale, setAutoScale] = useState(true)
+  const [downsample, setDownsample] = useState(true)
   const [expandedBitBytes, setExpandedBitBytes] = useState<Set<number>>(new Set())
 
   const byteCount = Math.max(summary.dlc, summary.frames[0].bytes.length)
@@ -60,7 +62,7 @@ export default function CanIdRow({ summary, isHighlighted, defaultExpanded = fal
     >
       {/* Row header */}
       <div
-        className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none"
+        className="group flex items-center gap-3 px-4 py-3 cursor-pointer select-none"
         onClick={() => setExpanded((e) => !e)}
       >
         <span className={`text-slate-500 text-sm transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}>
@@ -99,6 +101,18 @@ export default function CanIdRow({ summary, isHighlighted, defaultExpanded = fal
               {b.toString(16).toUpperCase().padStart(2, '0')}
             </span>
           ))}
+          {onOpenBuilder && (
+            <button
+              title="Open in Frame Builder"
+              onClick={e => {
+                e.stopPropagation()
+                onOpenBuilder({ id: summary.id, extended: lastFrame.extended, bytes: lastFrame.bytes })
+              }}
+              className="opacity-0 group-hover:opacity-100 transition-opacity ml-2 text-slate-600 hover:text-violet-400 px-1.5 py-0.5 rounded border border-transparent hover:border-violet-900 text-[11px] leading-none"
+            >
+              →
+            </button>
+          )}
         </div>
       </div>
 
@@ -136,6 +150,32 @@ export default function CanIdRow({ summary, isHighlighted, defaultExpanded = fal
               >
                 Reset
               </button>
+
+              {/* LTTB downsampling toggle — only shown when frame count is high enough to matter */}
+              {summary.frames.length > 500 && (
+                <>
+                  {!downsample && summary.frames.length > 2000 && (
+                    <span className="text-xs text-amber-500/80">
+                      ⚠ {summary.frames.length.toLocaleString()} pts
+                    </span>
+                  )}
+                  <button
+                    onClick={() => setDownsample(d => !d)}
+                    title={downsample
+                      ? 'LTTB downsampling active — graph shows a visually equivalent reduction of the raw points. Click to disable and render every point.'
+                      : 'Downsampling disabled — every raw point is rendered. Click to re-enable LTTB.'}
+                    className={`
+                      text-xs px-2.5 py-1 rounded-lg border transition-colors
+                      ${downsample
+                        ? 'bg-teal-900/40 border-teal-700 text-teal-300'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
+                      }
+                    `}
+                  >
+                    LTTB {downsample ? 'on' : 'off'}
+                  </button>
+                </>
+              )}
 
               {/* Auto-scale toggle */}
               <button
@@ -177,6 +217,7 @@ export default function CanIdRow({ summary, isHighlighted, defaultExpanded = fal
                 byteCount={byteCount}
                 height={220}
                 autoScale={autoScale}
+                downsample={downsample}
               />
             </div>
           )}
@@ -221,6 +262,7 @@ export default function CanIdRow({ summary, isHighlighted, defaultExpanded = fal
                         height={150}
                         singleByte={i}
                         autoScale={autoScale}
+                        downsample={downsample}
                       />
                     </div>
 

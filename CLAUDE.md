@@ -12,24 +12,24 @@ CAN bus frame analyzer for reverse engineering — parses GVRET CSV logs and SLC
 ## File Structure
 
 src/
-  App.tsx              — top-level: file/live mode state, tab routing, highlight/filter state
-  main.tsx             — React entry point
-  index.css            — Tailwind + global styles
-  types.ts             — CanFrame, CanIdSummary interfaces
-  webserial.d.ts       — minimal Web Serial API type declarations (not in TS DOM lib)
-  hooks/
-    useSerialCan.ts    — Web Serial hook: connect/disconnect/pause/clear, 20k ring buffer, 150ms batched updates
-  utils/
-    parseGvret.ts      — CSV parsing (PapaParse) + buildIdSummaries aggregator
-    parseSlcan.ts      — SLCAN log file parser + parseSingleSlcanFrame() for live use
-  components/
-    FileUpload.tsx      — drag-and-drop file intake + Live CAN connect panel (baud rate select)
-    LiveBar.tsx         — live mode controls: status, pause/resume, clear, disconnect
-    SignalScoutView.tsx — overwrite-mode live signal table: per-byte change highlighting, Hz/count sort, Hz filter
-    TableView.tsx       — sortable/filterable table of all CAN IDs
-    GraphView.tsx       — scrollable list of CanIdRow components
-    CanIdRow.tsx        — single CAN ID: main graph + per-byte expand, byte toggles
-    ByteGraph.tsx       — ECharts line graph with dataZoom (scroll + slider)
+App.tsx — top-level: file/live mode state, tab routing, highlight/filter state
+main.tsx — React entry point
+index.css — Tailwind + global styles
+types.ts — CanFrame, CanIdSummary interfaces
+webserial.d.ts — minimal Web Serial API type declarations (not in TS DOM lib)
+hooks/
+useSerialCan.ts — Web Serial hook: connect/disconnect/pause/clear, 20k ring buffer, 150ms batched updates
+utils/
+parseGvret.ts — CSV parsing (PapaParse) + buildIdSummaries aggregator
+parseSlcan.ts — SLCAN log file parser + parseSingleSlcanFrame() for live use
+components/
+FileUpload.tsx — drag-and-drop file intake + Live CAN connect panel (baud rate select)
+LiveBar.tsx — live mode controls: status, pause/resume, clear, disconnect
+SignalScoutView.tsx — overwrite-mode live signal table: per-byte change highlighting, Hz/count sort, Hz filter
+TableView.tsx — sortable/filterable table of all CAN IDs
+GraphView.tsx — scrollable list of CanIdRow components
+CanIdRow.tsx — single CAN ID: main graph + per-byte expand, byte toggles
+ByteGraph.tsx — ECharts line graph with dataZoom (scroll + slider)
 
 ## Key Logic Locations
 
@@ -148,3 +148,5 @@ Send frames back onto the bus via the same SLCAN serial connection used for live
 
 - Add `.github/workflows/deploy.yml` — build on push to main, deploy `dist/` to `gh-pages` branch
 - Add a proper README with screenshots, GIF of graph view, GVRET format description
+
+### Minor Features/Bug Fixes (Cross off once implemented)

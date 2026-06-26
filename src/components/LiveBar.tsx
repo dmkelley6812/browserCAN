@@ -31,9 +31,10 @@ function statusLabel(status: ConnectionStatus): string {
 interface Props {
   serial: UseSerialCanReturn
   onBack: () => void
+  onOpenBuilder: () => void
 }
 
-export default function LiveBar({ serial, onBack }: Props) {
+export default function LiveBar({ serial, onBack, onOpenBuilder }: Props) {
   const { status, isPaused, totalReceived, errorMessage, baudRate, serialBaud, sendInit } = serial
   const isConnected = status === 'connected'
   const isConnecting = status === 'connecting'
@@ -70,6 +71,20 @@ export default function LiveBar({ serial, onBack }: Props) {
       )}
 
       <div className="ml-auto flex items-center gap-2">
+        {/* Frame Builder */}
+        <button
+          onClick={onOpenBuilder}
+          disabled={!isConnected}
+          title={isConnected ? 'Open frame builder' : 'Connect to use frame builder'}
+          className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+            isConnected
+              ? 'bg-violet-800/30 border-violet-700/50 text-violet-300 hover:bg-violet-800/50'
+              : 'bg-slate-800/50 border-slate-700/30 text-slate-600 cursor-not-allowed'
+          }`}
+        >
+          Frame Builder
+        </button>
+
         {/* Pause / Resume */}
         {isConnected && (
           <button

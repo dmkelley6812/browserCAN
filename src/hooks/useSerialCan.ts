@@ -1,6 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import type { CanFrame, CanIdSummary } from '../types'
-import { buildIdSummaries } from '../utils/parseGvret'
 import { parseSingleSlcanFrame } from '../utils/parseSlcan'
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
@@ -22,7 +21,9 @@ const SLCAN_BAUD_CMD: Record<BaudRate, string> = {
 }
 
 const RING_BUFFER_SIZE = 20_000
+const MAX_FRAMES_PER_ID = 2000
 const BATCH_INTERVAL_MS = 150
+const FRAMES_UPDATE_INTERVAL_MS = 500
 
 interface SerialCanState {
   status: ConnectionStatus
@@ -34,6 +35,7 @@ interface SerialCanState {
   baudRate: BaudRate | null
   serialBaud: SerialBaud | null
   sendInit: boolean
+  recentTxIds: Set<number>
 }
 
 export interface UseSerialCanReturn extends SerialCanState {
@@ -42,6 +44,7 @@ export interface UseSerialCanReturn extends SerialCanState {
   pause: () => void
   resume: () => void
   clear: () => void
+  sendFrame: (id: number, extended: boolean, bytes: number[]) => Promise<void>
 }
 
 export function useSerialCan(): UseSerialCanReturn {
@@ -55,6 +58,7 @@ export function useSerialCan(): UseSerialCanReturn {
     baudRate: null,
     serialBaud: null,
     sendInit: false,
+    recentTxIds: new Set(),
   })
 
   // Ring buffer — mutated directly, not state
@@ -63,14 +67,24 @@ export function useSerialCan(): UseSerialCanReturn {
   const totalReceived = useRef(0)
   const isPausedRef = useRef(false)
 
+  // Incremental summary map — updated per-frame, avoids O(20k) rebuild on every tick
+  const summaryMapRef = useRef<Map<number, CanIdSummary>>(new Map())
+  // First-frame bytes per ID — baseline for byteChangeMask (never evicted)
+  const firstBytesRef = useRef<Map<number, number[]>>(new Map())
+  // Tracks when frames state was last fully snapshotted (less frequent than summary updates)
+  const lastFrameUpdateRef = useRef(0)
+
   // Serial port refs
   const portRef = useRef<SerialPort | null>(null)
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null)
   const writerRef = useRef<WritableStreamDefaultWriter<Uint8Array> | null>(null)
   const batchTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const encoderRef = useRef(new TextEncoder())
+  // TX echo tracking — map from CAN ID to cleanup timer handle
+  const recentTxTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
 
   function pushFrame(frame: CanFrame) {
+    // Global ring buffer — kept for TableView raw frame mode
     const buf = ringBuf.current
     if (buf.length < RING_BUFFER_SIZE) {
       buf.push(frame)
@@ -79,6 +93,46 @@ export function useSerialCan(): UseSerialCanReturn {
       ringHead.current = (ringHead.current + 1) % RING_BUFFER_SIZE
     }
     totalReceived.current++
+
+    // Incremental summary update — O(1) per frame instead of O(all frames) per tick
+    const map = summaryMapRef.current
+    const existing = map.get(frame.id)
+    if (!existing) {
+      firstBytesRef.current.set(frame.id, [...frame.bytes])
+      map.set(frame.id, {
+        id: frame.id,
+        idHex: frame.idHex,
+        dlc: frame.dlc,
+        frameCount: 1,
+        firstSeen: frame.timestamp,
+        lastSeen: frame.timestamp,
+        frames: [frame],
+        isChanging: false,
+        byteChangeMask: Array(frame.bytes.length).fill(false),
+        minBytes: [...frame.bytes],
+        maxBytes: [...frame.bytes],
+      })
+    } else {
+      existing.frameCount++
+      existing.lastSeen = frame.timestamp
+
+      const firstBytes = firstBytesRef.current.get(frame.id)!
+      for (let i = 0; i < frame.bytes.length; i++) {
+        const b = frame.bytes[i]
+        if (b < (existing.minBytes[i] ?? b)) existing.minBytes[i] = b
+        if (b > (existing.maxBytes[i] ?? b)) existing.maxBytes[i] = b
+        if (!existing.byteChangeMask[i] && b !== (firstBytes[i] ?? b)) {
+          existing.byteChangeMask[i] = true
+          existing.isChanging = true
+        }
+      }
+
+      // Per-ID rolling frame history for graphs — capped to avoid unbounded growth
+      existing.frames.push(frame)
+      if (existing.frames.length > MAX_FRAMES_PER_ID) {
+        existing.frames.shift()
+      }
+    }
   }
 
   function getSnapshot(): CanFrame[] {
@@ -90,12 +144,16 @@ export function useSerialCan(): UseSerialCanReturn {
   function startBatchTimer() {
     batchTimerRef.current = setInterval(() => {
       if (isPausedRef.current) return
-      const snapshot = getSnapshot()
-      const summaries = snapshot.length > 0 ? buildIdSummaries(snapshot) : []
+      // Summaries are maintained incrementally — just snapshot the map (O(IDs), not O(frames))
+      const summaries = Array.from(summaryMapRef.current.values())
+      // Raw frame snapshot is expensive (copies 20k entries) — only update at 500ms
+      const now = Date.now()
+      const needsFrameSnapshot = now - lastFrameUpdateRef.current >= FRAMES_UPDATE_INTERVAL_MS
+      if (needsFrameSnapshot) lastFrameUpdateRef.current = now
       setState(prev => ({
         ...prev,
-        frames: snapshot,
         summaries,
+        ...(needsFrameSnapshot ? { frames: getSnapshot() } : {}),
         totalReceived: totalReceived.current,
       }))
     }, BATCH_INTERVAL_MS)
@@ -169,10 +227,13 @@ export function useSerialCan(): UseSerialCanReturn {
           await writeCommand('O')
         }
 
-        // Reset ring buffer
+        // Reset ring buffer and incremental summary state
         ringBuf.current = []
         ringHead.current = 0
         totalReceived.current = 0
+        summaryMapRef.current = new Map()
+        firstBytesRef.current = new Map()
+        lastFrameUpdateRef.current = 0
 
         setState(prev => ({
           ...prev,
@@ -204,9 +265,39 @@ export function useSerialCan(): UseSerialCanReturn {
     })()
   }, [])
 
+  const sendFrame = useCallback(async (id: number, extended: boolean, bytes: number[]) => {
+    if (!writerRef.current) return
+    const idHex = id.toString(16).toUpperCase().padStart(extended ? 8 : 3, '0')
+    const dataHex = bytes.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join('')
+    const cmd = `${extended ? 'T' : 't'}${idHex}${bytes.length}${dataHex}`
+    await writerRef.current.write(encoderRef.current.encode(cmd + '\r'))
+
+    // Track ID as recently sent for TX echo tagging (cleared after 800ms)
+    const existing = recentTxTimers.current.get(id)
+    if (existing !== undefined) clearTimeout(existing)
+    setState(prev => {
+      const next = new Set(prev.recentTxIds)
+      next.add(id)
+      return { ...prev, recentTxIds: next }
+    })
+    const timer = setTimeout(() => {
+      setState(prev => {
+        const next = new Set(prev.recentTxIds)
+        next.delete(id)
+        return { ...prev, recentTxIds: next }
+      })
+      recentTxTimers.current.delete(id)
+    }, 800)
+    recentTxTimers.current.set(id, timer)
+  }, [])
+
   const disconnect = useCallback(async () => {
     stopBatchTimer()
     isPausedRef.current = false
+
+    // Clear all TX echo timers
+    for (const t of recentTxTimers.current.values()) clearTimeout(t)
+    recentTxTimers.current.clear()
 
     try { await writeCommand('C') } catch {}
     try { writerRef.current?.releaseLock(); writerRef.current = null } catch {}
@@ -218,6 +309,7 @@ export function useSerialCan(): UseSerialCanReturn {
       status: 'disconnected',
       isPaused: false,
       errorMessage: null,
+      recentTxIds: new Set(),
     }))
   }, [])
 
@@ -235,6 +327,9 @@ export function useSerialCan(): UseSerialCanReturn {
     ringBuf.current = []
     ringHead.current = 0
     totalReceived.current = 0
+    summaryMapRef.current = new Map()
+    firstBytesRef.current = new Map()
+    lastFrameUpdateRef.current = 0
     setState(prev => ({ ...prev, frames: [], summaries: [], totalReceived: 0 }))
   }, [])
 
@@ -242,5 +337,5 @@ export function useSerialCan(): UseSerialCanReturn {
     return () => { stopBatchTimer() }
   }, [])
 
-  return { ...state, connect, disconnect, pause, resume, clear }
+  return { ...state, connect, disconnect, pause, resume, clear, sendFrame }
 }

@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef } from 'react'
+import { useSessionState } from '../hooks/useSessionState'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { CanFrame, CanIdSummary } from '../types'
 
@@ -52,6 +53,7 @@ interface Props {
   onToggleHighlight: (id: number) => void
   filterIds: Set<number>
   onToggleFilter: (id: number) => void
+  onOpenBuilder: (seed: { id: number; extended: boolean; bytes: number[] }) => void
 }
 
 export default function TableView({
@@ -61,15 +63,18 @@ export default function TableView({
   onToggleHighlight,
   filterIds,
   onToggleFilter,
+  onOpenBuilder,
 }: Props) {
-  const [viewMode, setViewMode] = useState<ViewMode>('raw')
-  const [searchTerm, setSearchTerm] = useState('')
-  const [showOnlyFiltered, setShowOnlyFiltered] = useState(false)
+  const [viewMode, setViewMode] = useSessionState<ViewMode>('canvision-table-viewmode', 'raw')
+  const [searchTerm, setSearchTerm] = useSessionState('canvision-table-search', '')
+  const [showOnlyFiltered, setShowOnlyFiltered] = useSessionState('canvision-table-show-filtered', false)
   // Condensed-mode state
-  const [hideStatic, setHideStatic] = useState(false)
-  const [sortKey, setSortKey] = useState<'id' | 'count' | 'firstSeen'>('id')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [hideStatic, setHideStatic] = useSessionState('canvision-table-hide-static', false)
+  const [sortKey, setSortKey] = useSessionState<'id' | 'count' | 'firstSeen'>('canvision-table-sortkey', 'id')
+  const [sortDir, setSortDir] = useSessionState<'asc' | 'desc'>('canvision-table-sortdir', 'asc')
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
+  const [groupByFreq, setGroupByFreq] = useSessionState('canvision-table-groupbyfreq', false)
+  const [collapsedFreqGroups, setCollapsedFreqGroups] = useState<Set<'high' | 'medium' | 'low'>>(new Set())
 
   const maxDlc = useMemo(() => summaries.reduce((max, s) => Math.max(max, s.dlc), 0), [summaries])
 
@@ -132,6 +137,120 @@ export default function TableView({
     overscan: 15,
   })
 
+  function getGroupHz(s: CanIdSummary): number {
+    const dMs = s.lastSeen - s.firstSeen
+    return dMs > 100 ? s.frameCount / (dMs / 1000) : 0
+  }
+  function freqBand(hz: number): 'high' | 'medium' | 'low' {
+    if (hz >= 10) return 'high'
+    if (hz >= 1) return 'medium'
+    return 'low'
+  }
+  function toggleFreqGroup(g: 'high' | 'medium' | 'low') {
+    setCollapsedFreqGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(g)) next.delete(g)
+      else next.add(g)
+      return next
+    })
+  }
+
+  const FREQ_BANDS = [
+    { key: 'high' as const, label: 'High  ≥10 Hz', color: 'text-red-400' },
+    { key: 'medium' as const, label: 'Medium  1–10 Hz', color: 'text-amber-400' },
+    { key: 'low' as const, label: 'Low  <1 Hz', color: 'text-slate-400' },
+  ]
+
+  function renderSummaryRow(s: CanIdSummary) {
+    const isHighlighted = highlightedIds.has(s.id)
+    const isPinned = filterIds.has(s.id)
+    const isExpanded = expandedIds.has(s.id)
+    const latestBytes = s.frames[s.frames.length - 1].bytes
+    const rows = [
+      <tr
+        key={s.id}
+        onClick={() => onToggleHighlight(s.id)}
+        className={`border-b border-slate-800/60 cursor-pointer transition-colors
+          ${isHighlighted ? 'bg-sky-900/30 hover:bg-sky-900/40' : 'hover:bg-slate-800/50'}
+          ${isExpanded ? 'border-b-0' : ''}
+        `}
+      >
+        <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
+          <button
+            onClick={() => onToggleFilter(s.id)}
+            title={isPinned ? 'Remove filter' : 'Filter to this ID'}
+            className={`w-6 h-6 rounded text-xs transition-colors ${isPinned ? 'bg-sky-500 text-white' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
+          >
+            {isPinned ? '★' : '☆'}
+          </button>
+        </td>
+        <td className="px-3 py-2 font-mono">
+          <span className={`font-semibold ${isHighlighted ? 'text-sky-300' : 'text-slate-200'}`}>
+            {s.idHex}
+          </span>
+          <span className="ml-2 text-slate-500 text-xs">({s.id})</span>
+        </td>
+        <td className="px-3 py-2 font-mono text-slate-300">{s.dlc}</td>
+        <td className="px-3 py-2 font-mono text-slate-300">{s.frameCount.toLocaleString()}</td>
+        <td className="px-3 py-2 font-mono text-slate-400 text-xs">{s.firstSeen.toLocaleString()}</td>
+        <td className="px-3 py-2 font-mono text-slate-400 text-xs">{s.lastSeen.toLocaleString()}</td>
+        <td className="px-3 py-2">
+          {s.isChanging ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-emerald-900/50 text-emerald-400 border border-emerald-800">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              active
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-slate-800 text-slate-500 border border-slate-700">
+              static
+            </span>
+          )}
+        </td>
+        {Array.from({ length: maxDlc }, (_, i) => {
+          const b = latestBytes[i]
+          const exists = i < s.dlc
+          return (
+            <td key={i} className="px-3 py-2 font-mono">
+              {exists ? (
+                <span
+                  className={`text-xs ${s.byteChangeMask[i] ? BYTE_TEXT_COLORS[i % BYTE_TEXT_COLORS.length] : 'text-slate-600'}`}
+                  title={`B${i + 1}: 0x${b.toString(16).toUpperCase().padStart(2, '0')} (${b})`}
+                >
+                  {b.toString(16).toUpperCase().padStart(2, '0')}
+                </span>
+              ) : null}
+            </td>
+          )
+        })}
+        <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => toggleExpand(s.id)}
+              title="Show all frames for this ID"
+              className={`text-xs px-2 py-1 rounded-md border transition-colors ${isExpanded
+                ? 'bg-sky-900/40 border-sky-700 text-sky-300'
+                : 'bg-slate-800 border-slate-700 text-slate-500 hover:border-slate-600 hover:text-slate-300'
+              }`}
+            >
+              {isExpanded ? '▲' : '▼'}
+            </button>
+            <button
+              onClick={() => onOpenBuilder({ id: s.id, extended: s.frames[0]?.extended ?? false, bytes: s.frames[s.frames.length - 1].bytes })}
+              title="Open in Frame Builder"
+              className="text-xs px-2 py-1 rounded-md border bg-slate-800 border-slate-700 text-slate-500 hover:text-violet-400 hover:border-violet-900 transition-colors"
+            >
+              →
+            </button>
+          </div>
+        </td>
+      </tr>,
+    ]
+    if (isExpanded) {
+      rows.push(<FrameSubTable key={`sub-${s.id}`} frames={s.frames} maxDlc={maxDlc} />)
+    }
+    return rows
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
@@ -193,6 +312,19 @@ export default function TableView({
           </button>
         )}
 
+        {viewMode === 'condensed' && (
+          <button
+            onClick={() => setGroupByFreq(g => !g)}
+            className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+              groupByFreq
+                ? 'bg-indigo-600/20 border-indigo-700/50 text-indigo-300'
+                : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-600'
+            }`}
+          >
+            Group by Hz
+          </button>
+        )}
+
         <span className="ml-auto text-xs text-slate-500">
           {viewMode === 'raw'
             ? `${filteredFrames.length.toLocaleString()} / ${frames.length.toLocaleString()} frames`
@@ -216,6 +348,7 @@ export default function TableView({
                     B{i + 1}
                   </th>
                 ))}
+                <th className="px-3 py-2.5 w-8" />
               </tr>
             </thead>
             <tbody>
@@ -234,7 +367,7 @@ export default function TableView({
                         <tr
                           key={vi.index}
                           onClick={() => onToggleHighlight(f.id)}
-                          className={`border-b border-slate-800/40 cursor-pointer transition-colors
+                          className={`group border-b border-slate-800/40 cursor-pointer transition-colors
                             ${isHighlighted ? 'bg-sky-900/20 hover:bg-sky-900/30' : 'hover:bg-slate-800/30'}
                           `}
                         >
@@ -257,6 +390,15 @@ export default function TableView({
                               ) : null}
                             </td>
                           ))}
+                          <td className="px-2 py-1.5" onClick={e => e.stopPropagation()}>
+                            <button
+                              onClick={() => onOpenBuilder({ id: f.id, extended: f.extended, bytes: f.bytes.slice(0, f.dlc) })}
+                              title="Open in Frame Builder"
+                              className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-600 hover:text-violet-400 px-1.5 py-0.5 rounded border border-transparent hover:border-violet-900 text-[11px] leading-none"
+                            >
+                              →
+                            </button>
+                          </td>
                         </tr>
                       )
                     })}
@@ -301,87 +443,29 @@ export default function TableView({
               </tr>
             </thead>
             <tbody>
-              {filteredSummaries.map(s => {
-                const isHighlighted = highlightedIds.has(s.id)
-                const isPinned = filterIds.has(s.id)
-                const isExpanded = expandedIds.has(s.id)
-                const latestBytes = s.frames[s.frames.length - 1].bytes
-                return (
-                  <>
-                    <tr
-                      key={s.id}
-                      onClick={() => onToggleHighlight(s.id)}
-                      className={`border-b border-slate-800/60 cursor-pointer transition-colors
-                        ${isHighlighted ? 'bg-sky-900/30 hover:bg-sky-900/40' : 'hover:bg-slate-800/50'}
-                        ${isExpanded ? 'border-b-0' : ''}
-                      `}
-                    >
-                      <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
-                        <button
-                          onClick={() => onToggleFilter(s.id)}
-                          title={isPinned ? 'Remove filter' : 'Filter to this ID'}
-                          className={`w-6 h-6 rounded text-xs transition-colors ${isPinned ? 'bg-sky-500 text-white' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
-                        >
-                          {isPinned ? '★' : '☆'}
-                        </button>
-                      </td>
-                      <td className="px-3 py-2 font-mono">
-                        <span className={`font-semibold ${isHighlighted ? 'text-sky-300' : 'text-slate-200'}`}>
-                          {s.idHex}
-                        </span>
-                        <span className="ml-2 text-slate-500 text-xs">({s.id})</span>
-                      </td>
-                      <td className="px-3 py-2 font-mono text-slate-300">{s.dlc}</td>
-                      <td className="px-3 py-2 font-mono text-slate-300">{s.frameCount.toLocaleString()}</td>
-                      <td className="px-3 py-2 font-mono text-slate-400 text-xs">{s.firstSeen.toLocaleString()}</td>
-                      <td className="px-3 py-2 font-mono text-slate-400 text-xs">{s.lastSeen.toLocaleString()}</td>
-                      <td className="px-3 py-2">
-                        {s.isChanging ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-emerald-900/50 text-emerald-400 border border-emerald-800">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                            active
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-slate-800 text-slate-500 border border-slate-700">
-                            static
-                          </span>
-                        )}
-                      </td>
-                      {Array.from({ length: maxDlc }, (_, i) => {
-                        const b = latestBytes[i]
-                        const exists = i < s.dlc
-                        return (
-                          <td key={i} className="px-3 py-2 font-mono">
-                            {exists ? (
-                              <span
-                                className={`text-xs ${s.byteChangeMask[i] ? BYTE_TEXT_COLORS[i % BYTE_TEXT_COLORS.length] : 'text-slate-600'}`}
-                                title={`B${i + 1}: 0x${b.toString(16).toUpperCase().padStart(2, '0')} (${b})`}
-                              >
-                                {b.toString(16).toUpperCase().padStart(2, '0')}
-                              </span>
-                            ) : null}
-                          </td>
-                        )
-                      })}
-                      <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
-                        <button
-                          onClick={() => toggleExpand(s.id)}
-                          title="Show all frames for this ID"
-                          className={`text-xs px-2 py-1 rounded-md border transition-colors ${isExpanded
-                            ? 'bg-sky-900/40 border-sky-700 text-sky-300'
-                            : 'bg-slate-800 border-slate-700 text-slate-500 hover:border-slate-600 hover:text-slate-300'
-                          }`}
-                        >
-                          {isExpanded ? '▲' : '▼'}
-                        </button>
-                      </td>
-                    </tr>
-                    {isExpanded && (
-                      <FrameSubTable key={`sub-${s.id}`} frames={s.frames} maxDlc={maxDlc} />
-                    )}
-                  </>
-                )
-              })}
+              {(groupByFreq
+                ? FREQ_BANDS.flatMap(({ key, label, color }) => {
+                    const items = filteredSummaries.filter(s => freqBand(getGroupHz(s)) === key)
+                    if (items.length === 0) return []
+                    const collapsed = collapsedFreqGroups.has(key)
+                    return [
+                      <tr key={`grp-${key}`}>
+                        <td colSpan={100} className="px-3 py-1.5 bg-slate-950/60 border-b border-slate-800/60">
+                          <button
+                            onClick={() => toggleFreqGroup(key)}
+                            className="flex items-center gap-2 text-xs w-full text-left hover:text-slate-200 transition-colors select-none"
+                          >
+                            <span className="text-slate-600 text-[10px]">{collapsed ? '▶' : '▼'}</span>
+                            <span className={`font-semibold ${color}`}>{label}</span>
+                            <span className="text-slate-600">· {items.length} ID{items.length !== 1 ? 's' : ''}</span>
+                          </button>
+                        </td>
+                      </tr>,
+                      ...(collapsed ? [] : items.flatMap(renderSummaryRow)),
+                    ]
+                  })
+                : filteredSummaries.flatMap(renderSummaryRow)
+              )}
             </tbody>
           </table>
         )}
