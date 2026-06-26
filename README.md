@@ -11,13 +11,21 @@ Load a log file or plug in a SLCAN adapter and start reverse engineering CAN sig
 ---
 
 ## Screenshots
+<img width="2546" height="1268" alt="Screenshot 2026-06-26 134957" src="https://github.com/user-attachments/assets/4ff941be-2e1d-487b-933a-fc2b1ebf978d" />
 
-> Screenshots coming soon:
-> - `docs/screenshots/upload.png` — the file/connect landing screen
-> - `docs/screenshots/frame-table.png` — Frame Table view with a file loaded
-> - `docs/screenshots/graph-view.png` — Graph View showing multi-byte waveforms
-> - `docs/screenshots/signal-scout.png` — SignalScout in live mode with byte highlighting active
-> - `docs/screenshots/frame-builder.png` — Frame Builder modal with bit-toggle open
+<img width="2540" height="1269" alt="Screenshot 2026-06-26 134940" src="https://github.com/user-attachments/assets/dffaac1e-744c-4b73-bd17-29e3c0bae43d" />
+
+<img width="2531" height="746" alt="Screenshot 2026-06-26 134927" src="https://github.com/user-attachments/assets/561ca731-375e-4bf7-90c4-ea0b218fca21" />
+
+<img width="2546" height="1267" alt="Screenshot 2026-06-26 134918" src="https://github.com/user-attachments/assets/21ea1b66-c3e8-4620-8c54-a0b5e0e4b8d2" />
+
+
+<img width="2544" height="1266" alt="Screenshot 2026-06-26 134901" src="https://github.com/user-attachments/assets/ace7686e-1750-44f5-a3eb-75b65dca1254" />
+
+
+
+
+
 
 
 ---
