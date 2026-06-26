@@ -144,8 +144,12 @@ export function useSerialCan(): UseSerialCanReturn {
   function startBatchTimer() {
     batchTimerRef.current = setInterval(() => {
       if (isPausedRef.current) return
-      // Summaries are maintained incrementally — just snapshot the map (O(IDs), not O(frames))
-      const summaries = Array.from(summaryMapRef.current.values())
+      // Summaries are maintained incrementally — snapshot the map and give each summary a fresh
+      // frames array reference so useMemo in ByteGraph/BitGraph sees the change and re-renders.
+      const summaries = Array.from(summaryMapRef.current.values()).map(s => ({
+        ...s,
+        frames: s.frames.slice(),
+      }))
       // Raw frame snapshot is expensive (copies 20k entries) — only update at 500ms
       const now = Date.now()
       const needsFrameSnapshot = now - lastFrameUpdateRef.current >= FRAMES_UPDATE_INTERVAL_MS
