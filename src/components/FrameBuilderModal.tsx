@@ -33,8 +33,11 @@ export default function FrameBuilderModal({ seed, onClose, isConnected, sendFram
   const [intervalStr, setIntervalStr] = useState('100')
   const [isRepeating, setIsRepeating] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const [sendCount, setSendCount] = useState(0)
+  const [justSent, setJustSent] = useState(false)
 
   const repeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const justSentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Sync state when seed changes (modal (re)opens)
   useEffect(() => {
@@ -50,11 +53,17 @@ export default function FrameBuilderModal({ seed, onClose, isConnected, sendFram
     setDlc(Math.max(1, Math.min(8, seed.bytes.length || 8)))
     setExpandedByte(null)
     setSendError(null)
+    setSendCount(0)
+    setJustSent(false)
+    if (justSentTimerRef.current) clearTimeout(justSentTimerRef.current)
     stopRepeat()
   }, [seed])
 
   // Clean up on unmount
-  useEffect(() => () => { stopRepeat() }, [])
+  useEffect(() => () => {
+    stopRepeat()
+    if (justSentTimerRef.current) clearTimeout(justSentTimerRef.current)
+  }, [])
 
   function stopRepeat() {
     if (repeatRef.current !== null) {
@@ -123,6 +132,10 @@ export default function FrameBuilderModal({ seed, onClose, isConnected, sendFram
     try {
       await sendFrame(idNum, extended, parsedBytes)
       setSendError(null)
+      setSendCount(c => c + 1)
+      if (justSentTimerRef.current) clearTimeout(justSentTimerRef.current)
+      setJustSent(true)
+      justSentTimerRef.current = setTimeout(() => setJustSent(false), 1200)
     } catch (e) {
       setSendError(e instanceof Error ? e.message : String(e))
     }
@@ -291,9 +304,16 @@ export default function FrameBuilderModal({ seed, onClose, isConnected, sendFram
           {/* SLCAN preview */}
           <div className="flex items-center gap-3 bg-slate-950/60 border border-slate-800 rounded-lg px-4 py-2.5">
             <span className="text-xs text-slate-500 shrink-0">SLCAN</span>
-            <code className={`font-mono text-sm flex-1 ${canSend ? 'text-emerald-300' : 'text-slate-500'}`}>
+            <code className={`font-mono text-sm flex-1 transition-colors duration-300 ${
+              justSent ? 'text-emerald-400' : canSend ? 'text-emerald-300' : 'text-slate-500'
+            }`}>
               {slcanPreview}\r
             </code>
+            {isConnected && (
+              <span className="text-[10px] text-slate-600 shrink-0" title="If the adapter echoes transmitted frames, they appear in SignalScout with a TX badge">
+                TX echo → SignalScout
+              </span>
+            )}
           </div>
 
           {/* Send controls */}
@@ -302,13 +322,15 @@ export default function FrameBuilderModal({ seed, onClose, isConnected, sendFram
               onClick={handleSendOnce}
               disabled={!canSend || isRepeating}
               title={!isConnected ? 'Connect to send' : undefined}
-              className={`text-sm px-4 py-1.5 rounded-lg border font-medium transition-colors
-                ${canSend && !isRepeating
-                  ? 'bg-sky-700/30 border-sky-600/60 text-sky-300 hover:bg-sky-700/50'
-                  : 'bg-slate-800/50 border-slate-700/50 text-slate-600 cursor-not-allowed'
+              className={`text-sm px-4 py-1.5 rounded-lg border font-medium transition-all duration-200
+                ${justSent && !isRepeating
+                  ? 'bg-emerald-700/40 border-emerald-500/60 text-emerald-300'
+                  : canSend && !isRepeating
+                    ? 'bg-sky-700/30 border-sky-600/60 text-sky-300 hover:bg-sky-700/50'
+                    : 'bg-slate-800/50 border-slate-700/50 text-slate-600 cursor-not-allowed'
                 }`}
             >
-              Send Once
+              {justSent && !isRepeating ? '✓ Sent' : 'Send Once'}
             </button>
 
             {/* Repeat controls */}
@@ -340,14 +362,26 @@ export default function FrameBuilderModal({ seed, onClose, isConnected, sendFram
             </div>
 
             {isRepeating && (
-              <span className="text-xs text-emerald-400 animate-pulse">
-                Sending every {intervalStr}ms…
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-emerald-400 animate-pulse">Sending every {intervalStr}ms</span>
+                {sendCount > 0 && (
+                  <span className="text-emerald-600 font-mono tabular-nums">· {sendCount}×</span>
+                )}
+              </div>
+            )}
+
+            {!isRepeating && sendCount > 0 && (
+              <span className={`text-xs font-mono tabular-nums transition-colors duration-300 ${
+                justSent ? 'text-emerald-400' : 'text-slate-600'
+              }`}>
+                {sendCount}× sent
               </span>
             )}
 
             {sendError && (
-              <span className="text-xs text-rose-400 bg-rose-950/40 border border-rose-900 px-2 py-1 rounded">
-                {sendError}
+              <span className="text-xs text-rose-400 bg-rose-950/40 border border-rose-900 px-2 py-1 rounded flex items-center gap-1.5">
+                <span>⚠</span>
+                <span>{sendError}</span>
               </span>
             )}
           </div>
