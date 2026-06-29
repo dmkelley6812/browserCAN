@@ -45,6 +45,8 @@ export interface UseSerialCanReturn extends SerialCanState {
   resume: () => void
   clear: () => void
   sendFrame: (id: number, extended: boolean, bytes: number[]) => Promise<void>
+  /** Subscribe to every incoming CAN frame in real time (not batched). Returns unsubscribe fn. */
+  addFrameListener: (cb: (frame: CanFrame) => void) => () => void
 }
 
 export function useSerialCan(): UseSerialCanReturn {
@@ -74,6 +76,9 @@ export function useSerialCan(): UseSerialCanReturn {
   // Tracks when frames state was last fully snapshotted (less frequent than summary updates)
   const lastFrameUpdateRef = useRef(0)
 
+  // Real-time frame listeners (bypasses the 150ms batch timer — used by UDS view)
+  const frameListenersRef = useRef<Set<(frame: CanFrame) => void>>(new Set())
+
   // Serial port refs
   const portRef = useRef<SerialPort | null>(null)
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null)
@@ -93,6 +98,9 @@ export function useSerialCan(): UseSerialCanReturn {
       ringHead.current = (ringHead.current + 1) % RING_BUFFER_SIZE
     }
     totalReceived.current++
+
+    // Notify real-time listeners (used by UDS response matching)
+    for (const cb of frameListenersRef.current) cb(frame)
 
     // Incremental summary update — O(1) per frame instead of O(all frames) per tick
     const map = summaryMapRef.current
@@ -341,5 +349,10 @@ export function useSerialCan(): UseSerialCanReturn {
     return () => { stopBatchTimer() }
   }, [])
 
-  return { ...state, connect, disconnect, pause, resume, clear, sendFrame }
+  const addFrameListener = useCallback((cb: (frame: CanFrame) => void) => {
+    frameListenersRef.current.add(cb)
+    return () => { frameListenersRef.current.delete(cb) }
+  }, [])
+
+  return { ...state, connect, disconnect, pause, resume, clear, sendFrame, addFrameListener }
 }

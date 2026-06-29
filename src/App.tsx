@@ -10,10 +10,11 @@ import LiveBar from "./components/LiveBar";
 import TableView from "./components/TableView";
 import GraphView from "./components/GraphView";
 import SignalScoutView from "./components/SignalScoutView";
+import UdsView from "./components/UdsView";
 import FrameBuilderModal from "./components/FrameBuilderModal";
 import type { FrameBuilderSeed } from "./components/FrameBuilderModal";
 
-type Tab = "table" | "graph" | "signalscout";
+type Tab = "table" | "graph" | "signalscout" | "uds";
 
 export default function App() {
   // File-based data source
@@ -205,7 +206,7 @@ export default function App() {
 
       {/* Tab bar */}
       <div className="flex items-center gap-1 px-5 py-2 border-b border-slate-800 flex-shrink-0 bg-slate-900/40">
-        {(["table", "graph", "signalscout"] as Tab[]).map((tab) => (
+        {(["table", "graph", "signalscout", "uds"] as Tab[]).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -222,7 +223,9 @@ export default function App() {
               ? "Frame Table"
               : tab === "graph"
                 ? "Graph View"
-                : "SignalScout"}
+                : tab === "signalscout"
+                  ? "SignalScout"
+                  : "UDS"}
           </button>
         ))}
 
@@ -268,7 +271,7 @@ export default function App() {
           ) : (
             <WaitingForFrames isLiveMode={isLiveMode} />
           )
-        ) : (
+        ) : activeTab === "signalscout" ? (
           <SignalScoutView
             summaries={summaries ?? []}
             isLiveMode={isLiveMode}
@@ -276,6 +279,12 @@ export default function App() {
             onOpenBuilder={openBuilder}
             favoritedIds={favoritedIds}
             onToggleFavorite={toggleFavorite}
+          />
+        ) : (
+          <UdsView
+            isConnected={serial.status === "connected"}
+            sendFrame={serial.sendFrame}
+            addFrameListener={serial.addFrameListener}
           />
         )}
       </main>
