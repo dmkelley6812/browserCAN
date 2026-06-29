@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Dark rounded-square background matching the app's slate-900 -->
+  <rect width="32" height="32" rx="6" fill="#0f172a"/>
+  <!-- CAN bus digital waveform — two pulses of different widths, like real CAN bit data -->
+  <!-- Pulse 1 (narrow): x 4→13, Pulse 2 (wide): x 18→28, both between y 10–23 -->
+  <path d="M4,23 L4,10 L13,10 L13,23 L18,23 L18,10 L28,10 L28,23"
+        fill="none"
+        stroke="#38bdf8"
+        stroke-width="3"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+</svg>

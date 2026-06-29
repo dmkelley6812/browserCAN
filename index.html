@@ -2,9 +2,37 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/can-icon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- ── Favicon ── -->
+    <link rel="icon" type="image/svg+xml" href="/can-icon.svg" />
+    <!-- Fallback for browsers that don't support SVG favicons (legacy Safari, IE) -->
+    <link rel="alternate icon" href="/can-icon.svg" />
+    <!-- Apple devices use apple-touch-icon; point at the same SVG (iOS 15+) -->
+    <link rel="apple-touch-icon" href="/can-icon.svg" />
+
     <title>browserCAN — CAN Bus Analyzer</title>
+    <meta name="description"
+          content="Analyze, visualize, and reverse-engineer CAN bus data directly in your browser. Live capture via Web Serial API, GVRET and SLCAN file parsing, UDS diagnostic commands, and interactive signal graphs — no install required." />
+
+    <!-- ── Open Graph (Facebook, Discord, Slack, LinkedIn, iMessage, etc.) ── -->
+    <meta property="og:type"        content="website" />
+    <meta property="og:url"         content="https://dmkelley6812.github.io/browserCAN/" />
+    <meta property="og:title"       content="browserCAN — CAN Bus Analyzer" />
+    <meta property="og:description" content="Reverse-engineer CAN bus signals in your browser. Live capture, GVRET/SLCAN parsing, UDS diagnostics, and interactive graphs. No install." />
+    <meta property="og:image"       content="https://dmkelley6812.github.io/browserCAN/og-image.svg" />
+    <meta property="og:image:width"  content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt"   content="browserCAN — CAN Bus Analyzer showing five CAN ID waveforms in graph view" />
+
+    <!-- ── Twitter / X Card ── -->
+    <!-- summary_large_image shows the full 1200×630 preview -->
+    <meta name="twitter:card"        content="summary_large_image" />
+    <meta name="twitter:title"       content="browserCAN — CAN Bus Analyzer" />
+    <meta name="twitter:description" content="Reverse-engineer CAN bus signals in your browser. Live capture, GVRET/SLCAN parsing, UDS diagnostics, and interactive graphs." />
+    <meta name="twitter:image"       content="https://dmkelley6812.github.io/browserCAN/og-image.svg" />
+    <meta name="twitter:image:alt"   content="browserCAN — CAN Bus Analyzer" />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

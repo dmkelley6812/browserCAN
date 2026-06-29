@@ -1,0 +1,171 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <!-- Subtle dot grid texture -->
+    <pattern id="dots" width="28" height="28" patternUnits="userSpaceOnUse">
+      <circle cx="14" cy="14" r="0.8" fill="#1e293b"/>
+    </pattern>
+    <!-- Sky-400 glow used on waveforms -->
+    <filter id="glow-sky" x="-20%" y="-60%" width="140%" height="220%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glow-em" x="-20%" y="-60%" width="140%" height="220%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <!-- Gradient to blend left edge of graph panel into background -->
+    <linearGradient id="fade-left" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#020617" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#020617" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ── Background ── -->
+  <rect width="1200" height="630" fill="#020617"/>
+  <rect width="1200" height="630" fill="url(#dots)"/>
+
+  <!-- Subtle horizontal accent line across middle-ish -->
+  <line x1="0" y1="315" x2="540" y2="315" stroke="#0f172a" stroke-width="1"/>
+
+  <!-- ── LEFT PANEL — Branding ── -->
+
+  <!-- "browser" in slate-400, small -->
+  <text x="72" y="212"
+        font-family="'Inter', 'Segoe UI', Arial, sans-serif"
+        font-size="34" font-weight="400" letter-spacing="1"
+        fill="#64748b">browser</text>
+
+  <!-- "CAN" in sky-400, large bold -->
+  <text x="68" y="316"
+        font-family="'Inter', 'Segoe UI', Arial, sans-serif"
+        font-size="108" font-weight="700" letter-spacing="-2"
+        fill="#38bdf8">CAN</text>
+
+  <!-- Thin separator line -->
+  <rect x="72" y="332" width="240" height="2" rx="1" fill="#1e3a5f"/>
+
+  <!-- Tagline -->
+  <text x="72" y="373"
+        font-family="'Inter', 'Segoe UI', Arial, sans-serif"
+        font-size="22" font-weight="400"
+        fill="#475569">CAN Bus Frame Analyzer</text>
+
+  <!-- Feature bullet points -->
+  <circle cx="81" cy="415" r="4" fill="#38bdf8"/>
+  <text x="98" y="421"
+        font-family="'Inter', 'Segoe UI', Arial, sans-serif"
+        font-size="18" fill="#94a3b8">Live capture via Web Serial API</text>
+
+  <circle cx="81" cy="451" r="4" fill="#38bdf8"/>
+  <text x="98" y="457"
+        font-family="'Inter', 'Segoe UI', Arial, sans-serif"
+        font-size="18" fill="#94a3b8">GVRET + SLCAN file parsing</text>
+
+  <circle cx="81" cy="487" r="4" fill="#38bdf8"/>
+  <text x="98" y="493"
+        font-family="'Inter', 'Segoe UI', Arial, sans-serif"
+        font-size="18" fill="#94a3b8">Signal reverse engineering</text>
+
+  <circle cx="81" cy="523" r="4" fill="#38bdf8"/>
+  <text x="98" y="529"
+        font-family="'Inter', 'Segoe UI', Arial, sans-serif"
+        font-size="18" fill="#94a3b8">UDS diagnostic commands</text>
+
+  <!-- ── RIGHT PANEL — Simulated Graph View ── -->
+
+  <!-- Panel card background -->
+  <rect x="572" y="48" width="582" height="536" rx="14"
+        fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- Panel title bar -->
+  <rect x="572" y="48" width="582" height="48" rx="14" fill="#0f172a"/>
+  <rect x="572" y="82" width="582" height="14" fill="#0f172a"/>
+  <!-- Traffic-light dots -->
+  <circle cx="604" cy="72" r="6" fill="#1e293b"/>
+  <circle cx="626" cy="72" r="6" fill="#1e293b"/>
+  <circle cx="648" cy="72" r="6" fill="#1e293b"/>
+  <!-- Title -->
+  <text x="672" y="77"
+        font-family="'JetBrains Mono', 'Consolas', monospace"
+        font-size="13" fill="#334155">Graph View  •  5 IDs</text>
+  <!-- Divider under header -->
+  <line x1="572" y1="96" x2="1154" y2="96" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- ── CAN ID Row 1: 0x1A3 — sky waveform ── -->
+  <text x="588" y="137"
+        font-family="'JetBrains Mono', 'Consolas', monospace"
+        font-size="14" fill="#475569">0x1A3</text>
+  <text x="1098" y="137"
+        font-family="'JetBrains Mono', 'Consolas', monospace"
+        font-size="11" fill="#334155" text-anchor="end">8 bytes  247 Hz</text>
+  <!-- waveform: dense, high-frequency square wave -->
+  <path d="M660,148 L660,120 L672,120 L672,148 L682,148 L682,120 L698,120 L698,148 L706,148 L706,120 L720,120 L720,148 L730,148 L730,120 L748,120 L748,148 L756,148 L756,120 L770,120 L770,148 L780,148 L780,120 L798,120 L798,148 L808,148 L808,120 L820,120 L820,148 L830,148 L830,120 L848,120 L848,148 L860,148 L860,120 L874,120 L874,148 L886,148 L886,120 L900,120 L900,148 L912,148 L912,120 L928,120 L928,148 L940,148 L940,120 L956,120 L956,148 L966,148 L966,120 L980,120 L980,148 L992,148 L992,120 L1008,120 L1008,148 L1020,148 L1020,120 L1036,120 L1036,148 L1048,148 L1048,120 L1062,120 L1062,148 L1074,148 L1074,120 L1090,120 L1090,148 L1100,148"
+        fill="none" stroke="#38bdf8" stroke-width="1.8" filter="url(#glow-sky)"/>
+  <line x1="588" y1="162" x2="1142" y2="162" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- ── CAN ID Row 2: 0x0B7 — emerald waveform ── -->
+  <text x="588" y="205"
+        font-family="'JetBrains Mono', 'Consolas', monospace"
+        font-size="14" fill="#475569">0x0B7</text>
+  <text x="1098" y="205"
+        font-family="'JetBrains Mono', 'Consolas', monospace"
+        font-size="11" fill="#334155" text-anchor="end">4 bytes  100 Hz</text>
+  <!-- waveform: medium frequency -->
+  <path d="M660,216 L660,190 L688,190 L688,216 L706,216 L706,190 L748,190 L748,216 L764,216 L764,190 L786,190 L786,216 L810,216 L810,190 L848,190 L848,216 L868,216 L868,190 L894,190 L894,216 L920,216 L920,190 L958,190 L958,216 L976,216 L976,190 L1006,190 L1006,216 L1030,216 L1030,190 L1070,190 L1070,216 L1090,216 L1090,190 L1110,190 L1110,216 L1130,216"
+        fill="none" stroke="#34d399" stroke-width="1.8" filter="url(#glow-em)"/>
+  <line x1="588" y1="230" x2="1142" y2="230" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- ── CAN ID Row 3: 0x2FF — violet waveform ── -->
+  <text x="588" y="273"
+        font-family="'JetBrains Mono', 'Consolas', monospace"
+        font-size="14" fill="#475569">0x2FF</text>
+  <text x="1098" y="273"
+        font-family="'JetBrains Mono', 'Consolas', monospace"
+        font-size="11" fill="#334155" text-anchor="end">8 bytes   83 Hz</text>
+  <!-- waveform: varied pattern -->
+  <path d="M660,284 L660,258 L674,258 L674,284 L700,284 L700,258 L718,258 L718,284 L740,284 L740,258 L778,258 L778,284 L798,284 L798,258 L820,258 L820,284 L856,284 L856,258 L878,258 L878,284 L910,284 L910,258 L948,258 L948,284 L972,284 L972,258 L998,258 L998,284 L1034,284 L1034,258 L1056,258 L1056,284 L1094,284 L1094,258 L1130,258 L1130,284"
+        fill="none" stroke="#a78bfa" stroke-width="1.8"/>
+  <line x1="588" y1="298" x2="1142" y2="298" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- ── CAN ID Row 4: 0x1C4 — amber waveform (slow/periodic) ── -->
+  <text x="588" y="341"
+        font-family="'JetBrains Mono', 'Consolas', monospace"
+        font-size="14" fill="#475569">0x1C4</text>
+  <text x="1098" y="341"
+        font-family="'JetBrains Mono', 'Consolas', monospace"
+        font-size="11" fill="#334155" text-anchor="end">3 bytes   10 Hz</text>
+  <!-- waveform: slow/infrequent pulses -->
+  <path d="M660,352 L660,326 L710,326 L710,352 L810,352 L810,326 L860,326 L860,352 L990,352 L990,326 L1040,326 L1040,352 L1130,352"
+        fill="none" stroke="#fbbf24" stroke-width="1.8"/>
+  <line x1="588" y1="366" x2="1142" y2="366" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- ── CAN ID Row 5: 0x055 — cyan waveform (static bytes, flat-ish) ── -->
+  <text x="588" y="409"
+        font-family="'JetBrains Mono', 'Consolas', monospace"
+        font-size="14" fill="#475569">0x055</text>
+  <text x="1098" y="409"
+        font-family="'JetBrains Mono', 'Consolas', monospace"
+        font-size="11" fill="#334155" text-anchor="end">6 bytes  200 Hz</text>
+  <!-- waveform: high-frequency short pulses -->
+  <path d="M660,420 L660,396 L668,396 L668,420 L676,420 L676,396 L684,396 L684,420 L692,420 L692,396 L700,396 L700,420 L710,420 L710,396 L720,396 L720,420 L730,420 L730,396 L740,396 L740,420 L752,420 L752,396 L762,396 L762,420 L772,420 L772,396 L782,396 L782,420 L794,420 L794,396 L806,396 L806,420 L818,420 L818,396 L830,396 L830,420 L844,420 L844,396 L858,396 L858,420 L872,420 L872,396 L886,396 L886,420 L900,420 L900,396 L916,396 L916,420 L932,420 L932,396 L948,396 L948,420 L966,420 L966,396 L984,396 L984,420 L1002,420 L1002,396 L1020,396 L1020,420 L1040,420 L1040,396 L1060,396 L1060,420 L1082,420 L1082,396 L1104,396 L1104,420 L1130,420"
+        fill="none" stroke="#22d3ee" stroke-width="1.8"/>
+  <line x1="588" y1="434" x2="1142" y2="434" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- ── Mini X-axis time ruler ── -->
+  <line x1="660" y1="460" x2="1130" y2="460" stroke="#1e293b" stroke-width="1"/>
+  <text x="660" y="476" font-family="monospace" font-size="11" fill="#334155">0 ms</text>
+  <text x="880" y="476" font-family="monospace" font-size="11" fill="#334155" text-anchor="middle">250 ms</text>
+  <text x="1120" y="476" font-family="monospace" font-size="11" fill="#334155" text-anchor="end">500 ms</text>
+  <!-- Tick marks -->
+  <line x1="895" y1="455" x2="895" y2="465" stroke="#1e293b" stroke-width="1"/>
+  <line x1="777" y1="455" x2="777" y2="463" stroke="#1e293b" stroke-width="1"/>
+  <line x1="1013" y1="455" x2="1013" y2="463" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- Fade overlay on left edge of panel so it blends nicely -->
+  <rect x="572" y="96" width="90" height="370" fill="url(#fade-left)"/>
+
+  <!-- ── Bottom URL strip ── -->
+  <text x="600" y="606"
+        font-family="'Inter', 'Segoe UI', Arial, sans-serif"
+        font-size="15" fill="#1e293b">github.com/dmkelley6812/browserCAN</text>
+</svg>
