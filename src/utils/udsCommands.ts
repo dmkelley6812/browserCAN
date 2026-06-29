@@ -69,6 +69,11 @@ export interface UdsCommandDef {
    * Displayed as a hint in the UI.
    */
   responseNote?: string
+  /**
+   * Whether this command returns data that makes sense to poll on a timer.
+   * Enables the "Live Poll" button in the UI.
+   */
+  pollable?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +150,7 @@ const testerPresent: UdsCommandDef = {
 const readDataByIdentifier: UdsCommandDef = {
   id: 'readDataByIdentifier',
   sid: 0x22,
+  pollable: true,
   name: 'Read Data By Identifier',
   description:
     'Reads a data record identified by a 2-byte Data Identifier (DID). '
@@ -513,8 +519,8 @@ const routineControl: UdsCommandDef = {
 
 const obdCurrentData: UdsCommandDef = {
   id: 'obdCurrentData',
-  // OBD-II uses mode bytes instead of SIDs — mode 0x01 = show current data
   sid: 0x01,
+  pollable: true,
   name: 'OBD-II Mode 01 — Current Data',
   description:
     'Request real-time vehicle data (OBD-II). Uses broadcast ID 0x7DF; responses come from '

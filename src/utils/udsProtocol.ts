@@ -138,6 +138,8 @@ export class IsoTpReceiver {
 // UDS Response Parsing
 // ---------------------------------------------------------------------------
 
+import { describeDtc } from './dtcDescriptions'
+
 /** Negative Response Codes (NRC) per ISO 14229-1 Table A-1 */
 const NRC_DESCRIPTIONS: Record<number, string> = {
   0x10: 'General reject',
@@ -188,6 +190,14 @@ export function describeNrc(nrc: number): string {
 
 export type UdsResponseKind = 'positive' | 'negative' | 'unknown'
 
+export interface DtcEntry {
+  code: string
+  description: string
+  status: string
+  statusFlags: string[]
+  rawBytes: number[]
+}
+
 export interface ParsedUdsResponse {
   kind: UdsResponseKind
   /** Service ID from the request that this is a response to */
@@ -196,6 +206,12 @@ export interface ParsedUdsResponse {
   bytes: number[]
   /** Human-readable summary */
   summary: string
+  /** Populated for numeric responses (OBD-II PIDs, RDBI numeric values) */
+  numericValue?: number
+  /** Engineering unit for numericValue (e.g. "RPM", "°C", "km/h") */
+  unit?: string
+  /** Populated for DTC-list responses */
+  dtcList?: DtcEntry[]
 }
 
 /** Parse ISO-TP-reassembled UDS response bytes into a structured result. */
@@ -231,11 +247,16 @@ export function parseUdsResponse(bytes: number[], requestSid: number): ParsedUds
     }
   }
 
-  const summary = buildPositiveSummary(requestSid, bytes)
-  return { kind: 'positive', requestSid, bytes, summary }
+  return buildPositiveResponse(requestSid, bytes)
 }
 
-function buildPositiveSummary(sid: number, bytes: number[]): string {
+function ok(summary: string, extra?: Partial<ParsedUdsResponse>): ParsedUdsResponse {
+  return { kind: 'positive', requestSid: 0, bytes: [], summary, ...extra }
+}
+
+function buildPositiveResponse(sid: number, bytes: number[]): ParsedUdsResponse {
+  const base = { kind: 'positive' as const, requestSid: sid, bytes }
+
   switch (sid) {
     case 0x10: { // Diagnostic Session Control
       const sessionNames: Record<number, string> = {
@@ -248,7 +269,7 @@ function buildPositiveSummary(sid: number, bytes: number[]): string {
       const p2ms = bytes.length >= 4 ? ((bytes[2] << 8) | bytes[3]) : null
       const p2stMs = bytes.length >= 6 ? (((bytes[4] << 8) | bytes[5]) * 10) : null
       const timing = p2ms !== null ? ` — P2=${p2ms}ms, P2*=${p2stMs}ms` : ''
-      return `${name} active${timing}`
+      return { ...base, summary: `${name} active${timing}` }
     }
 
     case 0x11: { // ECU Reset
@@ -258,31 +279,30 @@ function buildPositiveSummary(sid: number, bytes: number[]): string {
         0x03: 'Soft Reset initiated',
       }
       const type = bytes[1] ?? 0
-      return resetNames[type] ?? `Reset type 0x${type.toString(16).toUpperCase()} initiated`
+      return { ...base, summary: resetNames[type] ?? `Reset type 0x${type.toString(16).toUpperCase()} initiated` }
     }
 
     case 0x14: // Clear DTC Information
-      return 'DTCs cleared successfully'
+      return { ...base, summary: 'DTCs cleared successfully' }
 
     case 0x19: { // Read DTC Information
       const sub = bytes[1] ?? 0
       if (sub === 0x01) {
-        // reportNumberOfDTCByStatusMask
         const count = bytes.length >= 6 ? ((bytes[4] << 8) | bytes[5]) : '?'
-        return `${count} DTC(s) found`
+        return { ...base, summary: `${count} DTC(s) found` }
       }
       if (sub === 0x02 || sub === 0x0A) {
-        // reportDTCByStatusMask / reportSupportedDTC
-        const dtcs = parseDtcList(bytes.slice(3)) // skip SID, sub, statusAvailMask
-        if (dtcs.length === 0) return 'No DTCs found'
-        return dtcs.map(d => `${d.code} [${d.status}]`).join('  ')
+        const dtcList = parseDtcListFull(bytes.slice(3)) // skip response SID, sub, statusAvailMask
+        if (dtcList.length === 0) return { ...base, summary: 'No DTCs found', dtcList: [] }
+        return { ...base, summary: `${dtcList.length} DTC(s) found`, dtcList }
       }
-      if (sub === 0x0F) {
-        // reportFirstTestFailedDTC
-        if (bytes.length < 7) return 'No first test failed DTC'
-        return `First failed: ${formatDtcCode(bytes[3], bytes[4])}`
+      if (sub === 0x0F || sub === 0x11 || sub === 0x12 || sub === 0x13) {
+        if (bytes.length < 6) return { ...base, summary: 'No DTC reported' }
+        const code = formatDtcCode(bytes[3], bytes[4])
+        const desc = describeDtc(code)
+        return { ...base, summary: `${code} — ${desc}` }
       }
-      return `DTC response (sub 0x${sub.toString(16).toUpperCase()}) — ${bytes.length - 1} bytes`
+      return { ...base, summary: `DTC response (sub 0x${sub.toString(16).toUpperCase()}) — ${bytes.length - 1} bytes` }
     }
 
     case 0x22: { // Read Data By Identifier
@@ -290,84 +310,202 @@ function buildPositiveSummary(sid: number, bytes: number[]): string {
       const data = bytes.slice(3)
       const didHex = `0x${did.toString(16).toUpperCase().padStart(4, '0')}`
 
-      // Try to decode well-known DIDs
       if (did === 0xF190) {
-        // VIN — 17 ASCII chars
         const vin = data.map(b => String.fromCharCode(b)).join('').replace(/[^\x20-\x7E]/g, '?')
-        return `VIN: ${vin}`
+        return { ...base, summary: `VIN: ${vin}` }
       }
       if (did === 0xF186) {
         const sessionNames: Record<number, string> = {
-          0x01: 'Default Session',
-          0x02: 'Programming Session',
-          0x03: 'Extended Diagnostic Session',
+          0x01: 'Default Session', 0x02: 'Programming Session', 0x03: 'Extended Diagnostic Session',
         }
-        return `Active session: ${sessionNames[data[0] ?? 0] ?? `0x${(data[0] ?? 0).toString(16).toUpperCase()}`}`
+        return { ...base, summary: `Active session: ${sessionNames[data[0] ?? 0] ?? `0x${(data[0] ?? 0).toString(16).toUpperCase()}`}` }
       }
 
-      // Generic: try ASCII, fall back to hex
       const asAscii = data.map(b => String.fromCharCode(b))
-      const isPrintable = asAscii.every(c => c.charCodeAt(0) >= 0x20 && c.charCodeAt(0) <= 0x7E)
-      if (isPrintable && data.length > 0) {
-        return `DID ${didHex}: "${asAscii.join('')}"`
+      const isPrintable = data.length > 0 && asAscii.every(c => c.charCodeAt(0) >= 0x20 && c.charCodeAt(0) <= 0x7E)
+      if (isPrintable) {
+        return { ...base, summary: `DID ${didHex}: "${asAscii.join('')}"` }
       }
-      return `DID ${didHex}: ${data.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}`
+      const hexStr = data.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')
+      return { ...base, summary: `DID ${didHex}: ${hexStr}` }
     }
 
     case 0x27: { // Security Access
       const sub = bytes[1] ?? 0
       if (sub % 2 === 1) {
-        // Odd sub-functions = seed response
         const seed = bytes.slice(2).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')
-        return `Seed received: ${seed || '(empty)'} — send key with sub-function 0x${(sub + 1).toString(16).toUpperCase().padStart(2, '0')}`
+        return { ...base, summary: `Seed: ${seed || '(empty)'} — send key with sub-function 0x${(sub + 1).toString(16).toUpperCase().padStart(2, '0')}` }
       }
-      return 'Security access granted'
+      return { ...base, summary: 'Security access granted' }
     }
 
     case 0x28: { // Communication Control
       const sub = bytes[1] ?? 0
       const names: Record<number, string> = {
-        0x00: 'Rx + Tx enabled',
-        0x01: 'Rx enabled, Tx disabled',
-        0x02: 'Rx disabled, Tx enabled',
-        0x03: 'Rx + Tx disabled',
+        0x00: 'Rx + Tx enabled', 0x01: 'Rx enabled, Tx disabled',
+        0x02: 'Rx disabled, Tx enabled', 0x03: 'Rx + Tx disabled',
       }
-      return names[sub] ?? `Communication control confirmed (sub 0x${sub.toString(16).toUpperCase()})`
+      return { ...base, summary: names[sub] ?? `Communication control confirmed (sub 0x${sub.toString(16).toUpperCase()})` }
     }
 
     case 0x2E: { // Write Data By Identifier
       const did = bytes.length >= 3 ? ((bytes[1] << 8) | bytes[2]) : 0
-      return `Write to DID 0x${did.toString(16).toUpperCase().padStart(4, '0')} confirmed`
+      return { ...base, summary: `Write to DID 0x${did.toString(16).toUpperCase().padStart(4, '0')} confirmed` }
     }
 
     case 0x31: { // Routine Control
       const sub = bytes[1] ?? 0
       const rid = bytes.length >= 4 ? ((bytes[2] << 8) | bytes[3]) : 0
-      const subNames: Record<number, string> = {
-        0x01: 'Routine started',
-        0x02: 'Routine stopped',
-        0x03: 'Routine results',
-      }
+      const subNames: Record<number, string> = { 0x01: 'Routine started', 0x02: 'Routine stopped', 0x03: 'Routine results' }
       const result = bytes.slice(4)
-      const extra = result.length > 0
-        ? `: ${result.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}`
-        : ''
-      return `${subNames[sub] ?? 'Routine response'} — ID 0x${rid.toString(16).toUpperCase().padStart(4, '0')}${extra}`
+      const extra = result.length > 0 ? `: ${result.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}` : ''
+      return { ...base, summary: `${subNames[sub] ?? 'Routine response'} — ID 0x${rid.toString(16).toUpperCase().padStart(4, '0')}${extra}` }
     }
 
-    case 0x3E: // Tester Present
-      return 'Tester Present acknowledged'
+    case 0x3E:
+      return { ...base, summary: 'Tester Present acknowledged' }
 
-    case 0x85: { // Control DTC Setting
+    case 0x85: {
       const sub = bytes[1] ?? 0
-      return sub === 0x01 ? 'DTC setting enabled' : 'DTC setting disabled'
+      return { ...base, summary: sub === 0x01 ? 'DTC setting enabled' : 'DTC setting disabled' }
+    }
+
+    // ── OBD-II Modes ──────────────────────────────────────────────────────
+    case 0x01: // Mode 01 response (0x41): Current Data
+      return decodeObdMode01(bytes, base)
+
+    case 0x03: // Mode 03 response (0x43): Stored DTCs
+    case 0x07: { // Mode 07 response (0x47): Pending DTCs
+      const label = sid === 0x03 ? 'Stored' : 'Pending'
+      const numDtcs = bytes[1] ?? 0
+      if (numDtcs === 0) return { ...base, summary: `No ${label} DTCs` }
+      const dtcList = parseObdDtcList(bytes.slice(2))
+      return { ...base, summary: `${dtcList.length} ${label} DTC(s) found`, dtcList }
+    }
+
+    case 0x09: { // Mode 09 response (0x49): Vehicle Info
+      const infoType = bytes[1] ?? 0
+      const count = bytes[2] ?? 0
+      const data = bytes.slice(3)
+      if (infoType === 0x02 || infoType === 0x0A) {
+        // VIN or ECU Name — ASCII
+        const str = data.slice(0, count * 17).map(b => String.fromCharCode(b)).join('').replace(/[^\x20-\x7E]/g, '?').trim()
+        const label = infoType === 0x02 ? 'VIN' : 'ECU Name'
+        return { ...base, summary: `${label}: ${str}` }
+      }
+      if (infoType === 0x04) {
+        const calId = data.map(b => String.fromCharCode(b)).join('').replace(/[^\x20-\x7E]/g, '?').trim()
+        return { ...base, summary: `Calibration ID: ${calId}` }
+      }
+      const hexStr = data.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')
+      return { ...base, summary: `Mode 09 InfoType 0x${infoType.toString(16).toUpperCase()}: ${hexStr}` }
     }
 
     default: {
       const responseHex = bytes.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')
-      return `Response: ${responseHex}`
+      return { ...base, summary: `Response: ${responseHex}` }
     }
   }
+}
+
+// ── OBD-II Mode 01 PID Decoder ────────────────────────────────────────────────
+
+interface PidResult { value: number; unit: string; label: string }
+
+function decodeObdPid(pid: number, A: number, B: number, C: number, D: number): PidResult | null {
+  switch (pid) {
+    case 0x04: return { value: Math.round(A / 2.55 * 10) / 10, unit: '%', label: 'Engine Load' }
+    case 0x05: return { value: A - 40, unit: '°C', label: 'Coolant Temp' }
+    case 0x06: return { value: Math.round((A - 128) / 1.28 * 10) / 10, unit: '%', label: 'Short-Term Fuel Trim B1' }
+    case 0x07: return { value: Math.round((A - 128) / 1.28 * 10) / 10, unit: '%', label: 'Long-Term Fuel Trim B1' }
+    case 0x08: return { value: Math.round((A - 128) / 1.28 * 10) / 10, unit: '%', label: 'Short-Term Fuel Trim B2' }
+    case 0x09: return { value: Math.round((A - 128) / 1.28 * 10) / 10, unit: '%', label: 'Long-Term Fuel Trim B2' }
+    case 0x0A: return { value: A * 3, unit: 'kPa', label: 'Fuel Pressure' }
+    case 0x0B: return { value: A, unit: 'kPa', label: 'Intake Manifold Pressure' }
+    case 0x0C: return { value: Math.round(((A * 256) + B) / 4), unit: 'RPM', label: 'Engine Speed' }
+    case 0x0D: return { value: A, unit: 'km/h', label: 'Vehicle Speed' }
+    case 0x0E: return { value: Math.round((A / 2 - 64) * 10) / 10, unit: '°', label: 'Timing Advance' }
+    case 0x0F: return { value: A - 40, unit: '°C', label: 'Intake Air Temperature' }
+    case 0x10: return { value: Math.round(((A * 256) + B) / 100 * 100) / 100, unit: 'g/s', label: 'MAF Air Flow' }
+    case 0x11: return { value: Math.round(A / 2.55 * 10) / 10, unit: '%', label: 'Throttle Position' }
+    case 0x14: return { value: A / 200, unit: 'V', label: 'O2 Sensor B1S1 Voltage' }
+    case 0x1F: return { value: (A * 256) + B, unit: 's', label: 'Engine Run Time' }
+    case 0x21: return { value: (A * 256) + B, unit: 'km', label: 'Distance with MIL On' }
+    case 0x2F: return { value: Math.round(A / 2.55 * 10) / 10, unit: '%', label: 'Fuel Tank Level' }
+    case 0x31: return { value: (A * 256) + B, unit: 'km', label: 'Distance Since DTCs Cleared' }
+    case 0x33: return { value: A, unit: 'kPa', label: 'Barometric Pressure' }
+    case 0x42: return { value: Math.round(((A * 256) + B) / 1000 * 100) / 100, unit: 'V', label: 'Control Module Voltage' }
+    case 0x43: return { value: Math.round(((A * 256) + B) / 2.55 * 10) / 10, unit: '%', label: 'Absolute Load Value' }
+    case 0x45: return { value: Math.round(A / 2.55 * 10) / 10, unit: '%', label: 'Relative Throttle Position' }
+    case 0x46: return { value: A - 40, unit: '°C', label: 'Ambient Air Temperature' }
+    case 0x47: return { value: Math.round(A / 2.55 * 10) / 10, unit: '%', label: 'Absolute Throttle Position B' }
+    case 0x49: return { value: Math.round(A / 2.55 * 10) / 10, unit: '%', label: 'Accelerator Pedal Position D' }
+    case 0x4A: return { value: Math.round(A / 2.55 * 10) / 10, unit: '%', label: 'Accelerator Pedal Position E' }
+    case 0x4C: return { value: Math.round(A / 2.55 * 10) / 10, unit: '%', label: 'Commanded Throttle Actuator' }
+    case 0x4D: return { value: (A * 256) + B, unit: 'min', label: 'Time with MIL On' }
+    case 0x4E: return { value: (A * 256) + B, unit: 'min', label: 'Time Since DTCs Cleared' }
+    case 0x52: return { value: Math.round(A / 1.28 * 10) / 10, unit: '%', label: 'Ethanol Fuel %' }
+    case 0x5A: return { value: Math.round(A / 2.55 * 10) / 10, unit: '%', label: 'Relative Accelerator Pedal Position' }
+    case 0x5B: return { value: Math.round(A / 2.55 * 10) / 10, unit: '%', label: 'Hybrid Battery Pack Remaining Life' }
+    case 0x5C: return { value: A - 40, unit: '°C', label: 'Engine Oil Temperature' }
+    case 0x5D: return { value: Math.round(((A * 256) + B) / 128 - 210), unit: '°', label: 'Fuel Injection Timing' }
+    case 0x5E: return { value: Math.round(((A * 256) + B) / 20 * 100) / 100, unit: 'L/h', label: 'Engine Fuel Rate' }
+    case 0x62: return { value: A - 40, unit: '°C', label: 'Actual Engine Torque' }
+    case 0x63: return { value: (A * 256) + B, unit: 'Nm', label: 'Engine Reference Torque' }
+    default: return null
+  }
+}
+
+function decodeObdMode01(bytes: number[], base: { requestSid: number; bytes: number[] }): ParsedUdsResponse {
+  // bytes = [0x41, PID, A, B?, C?, D?]
+  const pid = bytes[1] ?? 0
+  const A = bytes[2] ?? 0
+  const B = bytes[3] ?? 0
+  const C = bytes[4] ?? 0
+  const D = bytes[5] ?? 0
+
+  // Supported PIDs bitmask
+  if (pid === 0x00 || pid === 0x20 || pid === 0x40 || pid === 0x60 || pid === 0x80 || pid === 0xA0 || pid === 0xC0) {
+    const mask = (A << 24) | (B << 16) | (C << 8) | D
+    const basePid = pid + 1
+    const supported: string[] = []
+    for (let i = 0; i < 32; i++) {
+      if (mask & (0x80000000 >>> i)) supported.push(`0x${(basePid + i).toString(16).toUpperCase().padStart(2, '0')}`)
+    }
+    return { ...base, kind: 'positive', summary: `Supported PIDs: ${supported.join(', ') || 'none'}` }
+  }
+
+  const decoded = decodeObdPid(pid, A, B, C, D)
+  if (decoded) {
+    return {
+      ...base,
+      kind: 'positive',
+      summary: `${decoded.label}: ${decoded.value} ${decoded.unit}`,
+      numericValue: decoded.value,
+      unit: decoded.unit,
+    }
+  }
+
+  const hex = bytes.slice(2).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')
+  return { ...base, kind: 'positive', summary: `PID 0x${pid.toString(16).toUpperCase().padStart(2, '0')}: ${hex}` }
+}
+
+// ── OBD-II DTC parsing (mode 03/07 — no status byte per DTC) ─────────────────
+
+function parseObdDtcList(bytes: number[]): DtcEntry[] {
+  const dtcs: DtcEntry[] = []
+  for (let i = 0; i + 1 < bytes.length; i += 2) {
+    if (bytes[i] === 0x00 && bytes[i + 1] === 0x00) continue // padding
+    const code = formatDtcCode(bytes[i], bytes[i + 1])
+    dtcs.push({
+      code,
+      description: describeDtc(code),
+      status: 'stored',
+      statusFlags: ['stored'],
+      rawBytes: [bytes[i], bytes[i + 1]],
+    })
+  }
+  return dtcs
 }
 
 // ---------------------------------------------------------------------------
@@ -384,35 +522,43 @@ export function formatDtcCode(byte1: number, byte2: number): string {
   return `${system}${d1}${d2}${d3}${d4}`
 }
 
-/** Decode the 8-bit DTC status byte into human-readable flags. */
-export function decodeDtcStatus(status: number): string {
+/** Decode the 8-bit DTC status byte into flag strings. */
+export function decodeDtcStatusFlags(status: number): string[] {
   const flags: string[] = []
   if (status & 0x80) flags.push('MIL')
   if (status & 0x20) flags.push('failedSinceCleared')
   if (status & 0x08) flags.push('confirmed')
   if (status & 0x04) flags.push('pending')
   if (status & 0x01) flags.push('active')
+  return flags
+}
+
+/** @deprecated Use parseDtcListFull */
+export function decodeDtcStatus(status: number): string {
+  const flags = decodeDtcStatusFlags(status)
   return flags.length ? flags.join(', ') : 'inactive'
 }
 
-interface DtcEntry {
-  code: string
-  status: string
-  bytes: number[]
-}
-
-/** Parse a flat array of [B1, B2, B3_failureType, statusByte, ...] DTC records. */
-export function parseDtcList(bytes: number[]): DtcEntry[] {
+/** Parse a flat array of [B1, B2, failureType, statusByte, ...] UDS DTC records (SID 0x19). */
+export function parseDtcListFull(bytes: number[]): DtcEntry[] {
   const dtcs: DtcEntry[] = []
-  // UDS DTCs are 3 bytes + 1 status byte = 4 bytes per record
   for (let i = 0; i + 3 < bytes.length; i += 4) {
+    const code = formatDtcCode(bytes[i], bytes[i + 1])
+    const statusFlags = decodeDtcStatusFlags(bytes[i + 3])
     dtcs.push({
-      code: formatDtcCode(bytes[i], bytes[i + 1]),
-      status: decodeDtcStatus(bytes[i + 3]),
-      bytes: [bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]],
+      code,
+      description: describeDtc(code),
+      status: statusFlags.length ? statusFlags.join(', ') : 'inactive',
+      statusFlags,
+      rawBytes: [bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]],
     })
   }
   return dtcs
+}
+
+/** @deprecated Use parseDtcListFull */
+export function parseDtcList(bytes: number[]): { code: string; status: string; bytes: number[] }[] {
+  return parseDtcListFull(bytes).map(d => ({ code: d.code, status: d.status, bytes: d.rawBytes }))
 }
 
 // ---------------------------------------------------------------------------
